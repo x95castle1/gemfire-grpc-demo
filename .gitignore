@@ -1,8 +1,8 @@
 # Licensed Broadcom artifacts — never commit
-vendor/*
-!vendor/README.md
+gemfire-extensions/*
+!gemfire-extensions/README.md
 
-# Proto copied in from vendor/ at build time
+# Proto copied in from gemfire-extensions/ at build time
 **/src/main/proto/gemfire/
 
 # Build outputs
@@ -20,3 +20,7 @@ vendor/*
 # Generated certs / local overrides
 **/certs/generated/
 *.local.env
+
+# Load-test output (make load)
+load-testing/results/*
+!load-testing/results/.gitkeep

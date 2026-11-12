@@ -22,7 +22,7 @@ final class Demo {
 
   Demo(ClientCache cache, Config cfg, Checks checks) {
     this.cache = cache;
-    this.region = cache.createClientRegionFactory(ClientRegionShortcut.PROXY).create(cfg.demoRegion());
+    this.region = proxyRegion(cache, cfg.demoRegion());
     this.c = checks;
   }
 
@@ -128,7 +128,7 @@ final class Demo {
     }
 
     c.section("15. Errors are Java exceptions");
-    Region<Object, Object> missing = cache.createClientRegionFactory(ClientRegionShortcut.PROXY).create("no-such-region");
+    Region<Object, Object> missing = proxyRegion(cache, "no-such-region");
     try {
       missing.get("k");
       c.check("get on a region the servers don't have fails", false);
@@ -149,6 +149,13 @@ final class Demo {
   private Object putIfAbsentAndGet(Object key, Object value) {
     Object existing = region.putIfAbsent(key, value);
     return existing != null ? existing : value;
+  }
+
+  /** Client regions live for the life of the cache, so reuse one if the demo already made it. */
+  private static Region<Object, Object> proxyRegion(ClientCache cache, String name) {
+    Region<Object, Object> existing = cache.getRegion(name);
+    return existing != null ? existing
+        : cache.createClientRegionFactory(ClientRegionShortcut.PROXY).create(name);
   }
 
   private void cleanup() {

@@ -12,11 +12,11 @@ clients, Prometheus config and Grafana dashboards, and always uses the same topo
 ## Prerequisites
 
 - Docker with Compose v2.17 or later (Docker Desktop is fine, Apple Silicon included)
-- [`fzf`](https://github.com/junegunn/fzf) for `make logs` (`brew install fzf`)
-- The licensed gRPC extension and `gemfire.proto` in [`vendor/`](vendor/README.md)
+- `fzf`, `jq` and `curl` for the make targets (`brew install fzf jq`)
+- The licensed gRPC extension and `gemfire.proto` in [`gemfire-extensions/`](gemfire-extensions/README.md)
 - A GemFire **10.3.2+** image (default `gemfire/gemfire:10.3.2-jdk17`)
 
-You don't need a JDK, Gradle or Go on the host. Everything builds inside Docker.
+You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs inside Docker.
 
 ## Examples
 
@@ -41,21 +41,41 @@ function execution) are **not** available over gRPC. Use the Java, C++ or .NET c
 ## Quick start
 
 ```bash
-make start           # fzf-pick an example (or: make start EX=01, or cd 01-* && docker compose up -d --build)
-make status          # what's running: every example's containers, state, Grafana/Prometheus URLs
-make logs            # fzf picker: choose containers (TAB = several), live preview, ENTER to follow
+make                 # the menu
+make start           # fzf-pick an example (or: make start EX=01)
+make status          # what's running: containers, state, Grafana/Prometheus URLs
+make logs            # fzf picker: choose containers, live preview, ENTER to follow
+make load            # k6 load test: pick example → script → client, get a native-vs-gRPC table
+make results         # browse past load-test runs
 make stop            # stop everything that's running (or: make stop EX=01)
-make verify          # smoke-test every example (demo assertions must all pass)
+make verify          # smoke-test every example (all demo assertions must pass)
 ```
+
+## Load testing
+
+Every example's clients are HTTP services with the same `/crud` API, so the k6 scripts in
+[`load-testing/`](load-testing/README.md) live at the root and run against any example. That
+makes it easy to compare features with the workload held constant, for example plaintext (01)
+vs. TLS (06) vs. tokens (08).
+
+```bash
+make load EX=01 SCRIPT=crud/steady                         # both clients at once, 1000 req/s each
+make load EX=01 SCRIPT=crud/ramp                           # each client alone, 100 → 8000 req/s
+make load EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # override a script's knobs
+```
+
+Each run prints end-to-end latency (what k6 saw) next to the time inside the GemFire call
+(reported by the client), CPU per request and the gRPC/native ratio. It saves everything under
+`load-testing/results/` and adds an annotation to the example's Grafana dashboard.
 
 ## Conventions used by every example
 
-- **Clients** read their settings from environment variables. `MODE=demo` runs a narrated tour
-  with assertions and exits non-zero on failure. `MODE=bench` runs a rate-limited load and
-  exports metrics. `MODE=all` does both.
+- **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN` on the host). Each
+  runs a narrated demo with assertions at startup (`POST /demo` re-runs it; 200 means everything
+  passed) and serves `/crud/*` for load tests.
 - **The same metric names in every client**: `demo_op_latency_seconds{client,op}` (histogram),
   `demo_errors_total{client,op,code}` and `demo_checks_total{client,result}`.
 - **Colors** follow the client in every dashboard: native-java is blue, grpc-java is orange, and
   grpc-go is aqua.
-- **Ports**: example *NN* serves Grafana on `30NN` and Prometheus on `90NN`, so examples can run
-  side by side.
+- **Ports**: example *NN* uses Grafana `30NN`, Prometheus `90NN`, grpc-java `81NN` and
+  native-java `82NN`, so examples can run side by side.

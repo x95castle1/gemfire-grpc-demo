@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 if [ $# -gt 0 ] && [ -n "$1" ]; then
   dir=$(ls -d "$1"-*/ 2>/dev/null | head -1)
 else
-  command -v fzf >/dev/null || { echo "usage: make start EX=01  (or install fzf to pick interactively)" >&2; exit 1; }
+  { [ -t 0 ] && [ -t 1 ] && command -v fzf >/dev/null; } || { echo "usage: make start EX=01  (picking interactively needs a terminal and fzf)" >&2; exit 1; }
   dir=$(ls -d [0-9][0-9]-*/ | while read -r d; do [ -f "$d/docker-compose.yml" ] && echo "${d%/}"; done \
         | fzf --height=40% --reverse --prompt='start example> ' --preview 'head -40 {}/README.md') || exit 0
 fi

@@ -7,10 +7,10 @@ x-gemfire: &gemfire
   image: ${GEMFIRE_IMAGE}
   environment:
     ACCEPT_TERMS: "y"
-    # Load the gRPC extension (.gfm) from the mounted vendor folder.
-    GEMFIRE_EXTENSIONS_REPOSITORY_PATH: /vendor
+    # Load the gRPC extension (.gfm) from the mounted gemfire-extensions folder.
+    GEMFIRE_EXTENSIONS_REPOSITORY_PATH: /gemfire-extensions
   volumes:
-    - ${VENDOR_DIR}/${GRPC_EXTENSION_FILE}:/vendor/${GRPC_EXTENSION_FILE}:ro
+    - ${GEMFIRE_EXTENSIONS_DIR}/${GRPC_EXTENSION_FILE}:/gemfire-extensions/${GRPC_EXTENSION_FILE}:ro
     - ./gemfire:/scripts:ro
   healthcheck:
     # Healthy once the member logs that its gRPC service started. (Probing port 50051 directly
@@ -21,16 +21,21 @@ x-gemfire: &gemfire
     retries: 40
     start_period: 15s
 
+# Clients are small HTTP services (:8080): they run the narrated demo at startup, then serve the
+# CRUD API that the k6 load tests in ../load-testing call. See README "HTTP API".
 x-client: &client
   environment: &client-env
     EXAMPLE: 01-crud-basics
-    MODE: ${MODE}
-    BENCH_DURATION: ${BENCH_DURATION}
-    CONCURRENCY: ${CONCURRENCY}
-    TARGET_RATE: ${TARGET_RATE}
-    KEY_SPACE: ${KEY_SPACE}
-    PAYLOAD_BYTES: ${PAYLOAD_BYTES}
     REGION: crud
+    PAYLOAD_BYTES: ${PAYLOAD_BYTES}
+    HTTP_THREADS: ${HTTP_THREADS}
+    DEMO_ON_START: ${DEMO_ON_START}
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+    interval: 3s
+    timeout: 3s
+    retries: 60
+    start_period: 10s
   depends_on:
     gfsh-init: { condition: service_completed_successfully }
 
@@ -77,11 +82,13 @@ services:
     build:
       context: ./grpc-client-java
       additional_contexts:
-        vendor: ${VENDOR_DIR}
+        gemfire-extensions: ${GEMFIRE_EXTENSIONS_DIR}
     environment:
       <<: *client-env
       # Direct connection to one server (xDS discovery is covered in 05-xds-discovery).
       GRPC_TARGET: dns:///server1:50051
+    ports:
+      - "${GRPC_CLIENT_PORT}:8080"
 
   native-client-java:
     <<: *client
@@ -93,6 +100,8 @@ services:
       <<: *client-env
       LOCATOR_HOST: locator
       LOCATOR_PORT: "10334"
+    ports:
+      - "${NATIVE_CLIENT_PORT}:8080"
 
   # -------------------------------------------------------------------------
   # Monitoring
@@ -102,6 +111,9 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --web.enable-lifecycle
+      # k6 load tests push their metrics here (Prometheus remote write), as native histograms.
+      - --web.enable-remote-write-receiver
+      - --enable-feature=native-histograms
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:

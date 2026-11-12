@@ -1,4 +1,4 @@
-# vendor/: licensed artifacts (not committed)
+# gemfire-extensions/: licensed artifacts (not committed)
 
 The examples need two files from the **VMware Tanzu GemFire for gRPC** download. They're
 licensed Broadcom artifacts, so they are git-ignored and you supply them yourself.
@@ -15,13 +15,13 @@ licensed Broadcom artifacts, so they are git-ignored and you supply them yoursel
 2. Extract the two files into this folder:
 
    ```bash
-   tar -xzf gemfire-for-grpc-1.0.0.tgz -C vendor/ gemfire-for-grpc-1.0.0.gfm gemfire.proto
+   tar -xzf gemfire-for-grpc-1.0.0.tgz -C gemfire-extensions/ gemfire-for-grpc-1.0.0.gfm gemfire.proto
    ```
 
    The result should look like this:
 
    ```
-   vendor/
+   gemfire-extensions/
    ├── README.md
    ├── gemfire-for-grpc-1.0.0.gfm
    └── gemfire.proto
@@ -45,5 +45,5 @@ repository credentials are needed.
 
 ## Using an example outside this repo
 
-Each example finds this folder through `VENDOR_DIR=../vendor` in its `.env`. If you copy an
-example somewhere else, change `VENDOR_DIR` to point here, or to any folder with the same two files.
+Each example finds this folder through `GEMFIRE_EXTENSIONS_DIR=../gemfire-extensions` in its
+`.env`. If you copy an example somewhere else, change `GEMFIRE_EXTENSIONS_DIR` to point here, or to any folder with the same two files.

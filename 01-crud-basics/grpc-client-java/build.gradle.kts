@@ -33,7 +33,7 @@ dependencies {
     implementation("io.prometheus:prometheus-metrics-instrumentation-jvm:$prometheusVersion")
 }
 
-// gemfire.proto lives in src/main/proto/gemfire/v1/ (copied from vendor/ by the Dockerfile).
+// gemfire.proto lives in src/main/proto/gemfire/v1/ (copied from gemfire-extensions/ by the Dockerfile).
 protobuf {
     protoc { artifact = "com.google.protobuf:protoc:$protobufVersion" }
     plugins {
@@ -46,5 +46,7 @@ protobuf {
 
 application {
     mainClass.set("demo.Main")
-    applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-Xms256m", "-Xmx512m")
+    // sun.net.httpserver.nodelay: without TCP_NODELAY the JDK HTTP server's separate header and
+    // body writes hit Nagle + delayed ACK, adding ~40 ms to back-to-back keep-alive requests.
+    applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-Xms256m", "-Xmx512m", "-Dsun.net.httpserver.nodelay=true")
 }

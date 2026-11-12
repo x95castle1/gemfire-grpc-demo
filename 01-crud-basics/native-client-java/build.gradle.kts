@@ -27,5 +27,7 @@ dependencies {
 
 application {
     mainClass.set("demo.Main")
-    applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-Xms256m", "-Xmx512m")
+    // sun.net.httpserver.nodelay: without TCP_NODELAY the JDK HTTP server's separate header and
+    // body writes hit Nagle + delayed ACK, adding ~40 ms to back-to-back keep-alive requests.
+    applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-Xms256m", "-Xmx512m", "-Dsun.net.httpserver.nodelay=true")
 }

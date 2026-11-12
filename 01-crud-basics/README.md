@@ -1,56 +1,113 @@
 # 01 · CRUD basics: native Java client vs. GemFire for gRPC
 
 This example runs all **13 unary RPCs** of GemFire for gRPC, with every supported key and value
-type, next to the same operations done with the **native Java client**. Both clients then run an
-identical load, and Grafana compares them.
+type, next to the same operations done with the **native Java client**. Both clients are small
+HTTP services with an identical `/crud` API, so the same k6 load test drives both, and Grafana
+compares them.
 
 ```
-                 ┌──────────── GemFire 10.3.2 + gRPC extension 1.0.0 ────────────┐
- grpc-client-java ──── gRPC :50051 ─────▶ server1 ──(forward if bucket is remote)─▶ server2
- native-client-java ─ native :40404 ─▶ server1 / server2 (single-hop, straight to the bucket owner)
-                 │                   locator :10334 (native discovery) · :50051 (xDS)     │
-                 └────────────────────────────────────────────────────────────────────────┘
- prometheus ◀─ clients :8080 · members :7070/metrics/ · cadvisor        grafana :3001
+ k6 (make load) ──HTTP──▶ grpc-client-java :8080 ──gRPC :50051──▶ server1 ──(forward if bucket is remote)──▶ server2
+                └─HTTP──▶ native-client-java :8080 ─native :40404─▶ server1 / server2 (single-hop: straight to the bucket owner)
+                                                     locator :10334 (native discovery) · :50051 (xDS)
+ prometheus ◀── clients /metrics · members :7070/metrics/ · cadvisor · k6 (remote write)        grafana :3001
 ```
 
 ## Run it
 
-Prerequisites: Docker, plus the licensed files in [`../vendor`](../vendor/README.md).
+Prerequisites: Docker, plus the licensed files in [`../gemfire-extensions`](../gemfire-extensions/README.md).
 
 ```bash
-docker compose up -d --build                                    # cluster, clients, monitoring
-docker compose logs -f grpc-client-java native-client-java      # narrated demo, then bench progress
-open http://localhost:3001                                      # Grafana (anonymous admin)
-docker compose down -v                                          # stop and clean up
+make start EX=01          # cluster, both clients (they run the narrated demo at startup), monitoring
+make logs EX=01           # read the demo: pick grpc-client-java / native-client-java
+make load EX=01           # pick a k6 script, run it against both clients, get a comparison table
+open http://localhost:3001
+make stop EX=01
 ```
 
-Smoke test (demo assertions only; exit code 0 means pass): `make verify EX=01` from the repo root. Other targets: `make start|stop|status|logs`.
+Without `make`, run `docker compose up -d --build` in this folder. Smoke test: `make verify EX=01`.
 
-## What each client does
+## The two clients
 
-1. **Demo** (`MODE=demo` or `all`): a narrated walk through every operation, where each step
-   asserts the documented behavior (`✔`/`✘`). gRPC uses region `demo-grpc` and native uses
-   `demo-native`, so counts are exact.
-2. **Bench** (`MODE=bench` or `all`): `CONCURRENCY` threads at a fixed `TARGET_RATE`, running a
-   weighted mix of all 13 operations against region `crud`. Each client uses its own key prefix.
-   Latency is measured around each call, inside the client.
+Each client is a Java 21 HTTP service: the JDK's built-in server with the same fixed pool of 64
+worker threads on both sides. Only the class behind `/crud` differs:
+[`GrpcCrud`](grpc-client-java/src/main/java/demo/GrpcCrud.java) on one side and
+[`NativeCrud`](native-client-java/src/main/java/demo/NativeCrud.java) on the other.
 
-Knobs live in [`.env`](.env):
-
-| Variable | Default | Meaning |
+| | grpc-java | native-java |
 |---|---|---|
-| `MODE` | `all` | `demo`, `bench`, or `all` (demo, then bench) |
-| `BENCH_DURATION` | `15m` | `30s`, `10m`, `1h`… or `0` to run until stopped |
-| `CONCURRENCY` | `4` | worker threads per client |
-| `TARGET_RATE` | `1000` | ops/s per client (`0` = unlimited). A fixed rate keeps the comparison fair. |
-| `KEY_SPACE` | `10000` | distinct keys per client (preloaded before the bench) |
-| `PAYLOAD_BYTES` | `1024` | `byte[]` value size for writes |
-| `OP_MIX` | see `Config.java` | e.g. `Get=80,Put=20` to override the 13-op mix |
+| Host port | [localhost:8101](http://localhost:8101) | [localhost:8201](http://localhost:8201) |
+| Connects to | `dns:///server1:50051` (plaintext, one HTTP/2 channel) | locator `locator[10334]`, PR single-hop pool |
+| Demo region | `demo-grpc` | `demo-native` |
+| Load region / key prefix | `crud` / `grpc:` | `crud` / `native:` |
+
+### HTTP API
+
+| Endpoint | What it does |
+|---|---|
+| `GET /` | lists the endpoints |
+| `GET /health` | 200 once the GemFire connection is up |
+| `POST /demo` | runs the narrated demo; 200 means every assertion passed (also runs at startup) |
+| `GET /demo` | result of the last demo run, e.g. `{"ran":true,"passed":38,"failed":0}` |
+| `POST /crud/preload?count=10000&size=1024` | bulk-writes keys `0..count-1` (PutStream / putAll) |
+| `GET /crud/{get,contains-key,entry-count}?key=42` | read operations |
+| `POST /crud/{put,get-and-put,remove,remove-if,get-and-remove,put-if-absent,put-if-absent-and-get,replace,replace-if,get-and-replace}?key=42&size=1024` | write operations |
+| `GET /metrics` | Prometheus metrics |
+
+```bash
+$ curl -s -X POST 'localhost:8101/crud/get-and-put?key=7&size=10'
+{"op":"GetAndPut","key":"7","previousBytes":1024,"micros":2039}
+```
+
+Every `/crud` response carries the header **`X-GemFire-Micros`**: the time spent inside the
+GemFire call alone. k6 records it next to its own end-to-end timing. The same number is the
+`demo_op_latency_seconds` histogram on the dashboards.
+
+Settings in [`.env`](.env): `DEMO_ON_START`, `PAYLOAD_BYTES` (default value size; requests can
+override it with `?size=`), `HTTP_THREADS`, and the host ports.
+
+## Load testing
+
+The k6 scripts live at the repo root in [`../load-testing`](../load-testing/README.md), because
+the same scripts run against every example. To list them, run `make load EX=01` and browse with
+fzf, or run one directly:
+
+```bash
+make load EX=01 SCRIPT=crud/steady                                   # both clients at once
+make load EX=01 SCRIPT=crud/ramp                                     # each client alone, 100 → 8000 req/s
+make load EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
+make results                                                         # browse past runs
+```
+
+A 2-minute `crud/steady` run (1,000 req/s per client, both at once, Apple Silicon laptop):
+
+```
+CLIENT         REQUESTS    REQ/S  FAILED │  E2E p50      p95      p99 │   GF p50      p99 │  CPU/REQ  RESULT
+                                         │     (ms)     (ms)     (ms) │     (ms)     (ms) │    (µs)
+grpc-java        120000    998.3      0% │    0.451    0.742    1.437 │    0.303    0.968 │      246  PASS
+native-java      120002    998.8      0% │    0.249    0.465    0.849 │    0.094    0.423 │      181  PASS
+gRPC/native                              │     1.8x     1.6x     1.7x │     3.2x     2.3x │     1.4x
+```
+
+- **E2E** is what k6 saw: the HTTP request plus the GemFire call.
+- **GF** is the GemFire call alone. Both services carry the same ~0.15 ms of HTTP overhead, so the
+  end-to-end ratio (1.8×) understates the difference between the clients, and the GF ratio (3.2×)
+  shows it.
+- **CPU/REQ** is the client container's CPU (from cAdvisor) divided by requests.
+
+At maximum throughput (`crud/saturate`: 16 VUs in a closed loop, each client alone), the gap
+widens:
+
+```
+CLIENT         REQUESTS    REQ/S  FAILED │  E2E p50      p95      p99 │   GF p50      p99 │  CPU/REQ  RESULT
+grpc-java        319893  15840.6      0% │    0.824    1.832    3.474 │    0.562    2.412 │      163  PASS
+native-java      623377  30926.5      0% │    0.375    1.033    2.207 │    0.091    0.670 │       78  PASS
+gRPC/native                              │     2.2x     1.8x     1.6x │     6.1x     3.6x │     2.1x
+```
 
 ## RPC ↔ native Java API
 
 The native column is the cheapest native code that returns **the same information** as the RPC.
-The bench uses exactly these calls.
+`NativeCrud` uses exactly these calls.
 
 | gRPC RPC | Returns | Native Java (client `PROXY` region) | Notes |
 |---|---|---|---|
@@ -79,35 +136,28 @@ exactly. They map to `String`, `byte[]`, `Integer`, `Long`, `Boolean`, `Double`,
 **Errors.** gRPC returns status codes; for example, a missing region gives `FAILED_PRECONDITION` and
 an unset key gives `INVALID_ARGUMENT`. The native client throws exceptions:
 `ServerOperationException ← RegionDestroyedException`, or a client-side `NullPointerException`.
-All of them are covered in `10-error-handling`.
+Over HTTP, a failed GemFire call returns `502` with the code in `X-Error-Code`. All of them are
+covered in `10-error-handling`.
 
 ## What to look for in Grafana
 
-Open the **"01 · CRUD basics: native vs gRPC"** dashboard. The numbers below are from one run on
-an Apple Silicon laptop under Docker Desktop, at 1,000 ops/s per client with 4 threads and 1 KiB
-values. Treat the *shape* as the takeaway; your absolute numbers will differ.
+Open **"01 · CRUD basics: native vs gRPC"** at [localhost:3001](http://localhost:3001). Each
+`make load` run appears as a shaded band; use the **load run** dropdown to focus on one run.
 
-| Signal | native-java | grpc-java |
-|---|---|---|
-| p50 latency, all ops | ~135 µs | ~370 µs |
-| p99 latency, all ops | ~0.7 ms | ~1.3–1.8 ms |
-| `Get` p50 | ~115 µs | ~360 µs (≈3.1×) |
-| Client CPU per operation | ~100 µs | ~180 µs |
-| `GetAndPut` / `GetAndRemove` / `Remove`, gRPC ÷ native | | ≈1.4–1.8×. The gap narrows because native needs 2 round trips |
-
+- **Load test (k6) row.** For each client, a solid line (end-to-end) and a dashed line (GemFire
+  call). The two clients' solid lines sit closer together than their dashed lines, because HTTP
+  overhead is the same on both sides.
 - **Per-operation latency table.** Sorted by the gRPC ÷ native ratio. Single-call ops sit around
-  2.3–3×. The ops where native needs two calls drop to about 1.4–1.8×, and the atomic gRPC call
-  becomes the better deal.
+  3×. The ops where native needs two calls (`GetAndPut`, `GetAndRemove`, `Remove`) drop to about
+  1.4–1.8×, and the atomic gRPC call becomes the better deal.
 - **Puts forwarded to the owning server.** The gRPC client sends everything to `server1`, so
-  about half its writes (~200/s here) land on a server that doesn't own the bucket and get
-  forwarded. Native single-hop sends each op straight to the owner. That forwarding hop is part
-  of the latency gap. `05-xds-discovery` spreads gRPC traffic across servers through the locator.
-- **CPU: GemFire members.** `server1` (the gRPC entry point: protobuf decoding plus forwarding)
-  burns about 2–3× the CPU of `server2`.
+  about half its writes land on a server that doesn't own the bucket and get forwarded. Native
+  single-hop sends each op straight to the owner. That hop is part of the gap.
+  `05-xds-discovery` spreads gRPC traffic across servers through the locator.
+- **CPU: GemFire members.** `server1` is the gRPC entry point (protobuf decoding plus
+  forwarding) and burns about 2–3× the CPU of `server2`.
 - **Cache-server requests/s.** Only native traffic shows up here. gRPC requests bypass the
   cache-server (port 40404) statistics entirely.
-- **Client connections per server.** Native uses a pool of sockets per server. gRPC uses one
-  multiplexed HTTP/2 connection.
 
 ## Findings and gotchas
 
@@ -127,33 +177,45 @@ values. Treat the *shape* as the takeaway; your absolute numbers will differ.
 4. **Client-region `put()` and `remove()` don't return old values.** That's native-client
    behavior, not a gRPC issue, but it makes `GetAndPut`, `GetAndRemove` and `Remove` (with its
    flag) genuinely more capable over gRPC: one atomic round trip.
+5. **Mind the 4 MiB message limit when batching.** One `PutStream` message must stay under
+   `gemfire.grpc.max-message-size` (4 MiB by default), and so must one value. The clients flush
+   preload batches at 500 entries or about 1 MiB. Try `crud/large-payload` with
+   `K6_ARGS="-e SIZE=5000000"`, or `curl -X POST 'localhost:8101/crud/put?key=big&size=5000000'`.
+   A single 5 MB value fails over gRPC with `RESOURCE_EXHAUSTED: gRPC message exceeds maximum
+   size 4194304` and succeeds natively.
+
+6. **Turn on `TCP_NODELAY` in a JDK `HttpServer`.** Without
+   `-Dsun.net.httpserver.nodelay=true`, back-to-back requests on a keep-alive connection stall
+   about 40 ms on Nagle plus delayed ACK. `crud/saturate` managed 370 req/s instead of 15,000+.
+   Both clients set it (`build.gradle.kts`). This is about the HTTP wrapper, not GemFire, but it
+   would have hidden every difference between the two clients.
 
 ## Layout
 
 ```
 01-crud-basics/
-├── .env                      # image, vendor path, ports, workload knobs
+├── .env                      # image, extensions path, ports, client settings
 ├── docker-compose.yml        # locator, server1, server2, gfsh-init, 2 clients, prometheus, grafana, cadvisor
 ├── gemfire/
 │   ├── start-member.sh       # starts a locator/server in the foreground with the gRPC extension + metrics
 │   └── init.gfsh             # creates regions crud, demo-grpc, demo-native
-├── grpc-client-java/         # grpc-java 1.84.3, stubs generated from vendor/gemfire.proto at build time
-│   └── src/main/java/demo/   # Main · Demo (tour) · GrpcOps (bench ops) · Bench · Metrics · Config · Checks
+├── grpc-client-java/         # grpc-java 1.84.3, stubs generated from gemfire-extensions/gemfire.proto at build time
+│   └── src/main/java/demo/   # Main · Api (HTTP) · GrpcCrud · Demo · Metrics · Config · Checks
 ├── native-client-java/       # GemFire ClientCache; jars copied from the GemFire image at build time
-│   └── src/main/java/demo/   # Main · Demo (tour) · NativeOps (bench ops) · Bench · Metrics · Config · Checks
+│   └── src/main/java/demo/   # Main · Api (HTTP) · NativeCrud · Demo · Metrics · Config · Checks
 └── monitoring/
-    ├── prometheus.yml
+    ├── prometheus.yml        # also accepts k6 remote write (native histograms)
     └── grafana/{provisioning,dashboards}/
 ```
 
-`Bench`, `Metrics`, `Config` and `Checks` are the same in both clients. Only `Demo` and the
-`*Ops` class differ.
+`Api`, `Metrics`, `Config` and `Checks` are identical in both clients. Only `Main`, `Demo` and the
+`*Crud` class differ.
 
 ### Building outside Docker
 
 ```bash
 # gRPC client: needs gemfire.proto in place first
-mkdir -p grpc-client-java/src/main/proto/gemfire/v1 && cp ../vendor/gemfire.proto grpc-client-java/src/main/proto/gemfire/v1/
+mkdir -p grpc-client-java/src/main/proto/gemfire/v1 && cp ../gemfire-extensions/gemfire.proto grpc-client-java/src/main/proto/gemfire/v1/
 (cd grpc-client-java && gradle installDist)
 # Native client: point at a GemFire 10.3.2 install's lib folder
 (cd native-client-java && gradle installDist -PgemfireLib=/path/to/vmware-gemfire-10.3.2/lib)

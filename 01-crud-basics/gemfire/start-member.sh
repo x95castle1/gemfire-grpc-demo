@@ -10,10 +10,10 @@ set -euo pipefail
 
 # (Docker creates an empty *directory* when a bind-mount source is missing, so check for a file.)
 gfm_found=false
-for f in /vendor/*.gfm; do [ -f "$f" ] && gfm_found=true; done
+for f in /gemfire-extensions/*.gfm; do [ -f "$f" ] && gfm_found=true; done
 if [ "$gfm_found" != true ]; then
-  echo "ERROR: no gemfire-for-grpc .gfm found in /vendor." >&2
-  echo "       Put the extension in VENDOR_DIR (see ../vendor/README.md) and check GRPC_EXTENSION_FILE in .env." >&2
+  echo "ERROR: no gemfire-for-grpc .gfm found in /gemfire-extensions." >&2
+  echo "       Put the extension in GEMFIRE_EXTENSIONS_DIR (see ../gemfire-extensions/README.md) and check GRPC_EXTENSION_FILE in .env." >&2
   exit 1
 fi
 

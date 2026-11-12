@@ -1,10 +1,16 @@
 package demo;
 
-/** Narrated assertions for demo mode. Failures are counted, not thrown, so the whole tour runs. */
+/**
+ * Narrated assertions for the demo. Failures are counted rather than thrown, so the whole tour
+ * runs. Output goes to stdout (container logs) and is also kept for the HTTP response.
+ */
 final class Checks {
+
+  record Report(int passed, int failed, String text) {}
 
   private final String client;
   private final Metrics metrics;
+  private final StringBuilder text = new StringBuilder();
   private int passed;
   private int failed;
 
@@ -14,7 +20,7 @@ final class Checks {
   }
 
   void section(String title) {
-    System.out.printf("%n[%s] ── %s %s%n", client, title, "─".repeat(Math.max(3, 64 - title.length())));
+    line("%n[%s] ── %s %s", client, title, "─".repeat(Math.max(3, 64 - title.length())));
   }
 
   void check(String description, boolean ok) {
@@ -23,22 +29,29 @@ final class Checks {
 
   void check(String description, boolean ok, Object observed) {
     String suffix = observed == null ? "" : "   → " + observed;
-    System.out.printf("[%s]   %s %s%s%n", client, ok ? "✔" : "✘ FAILED:", description, suffix);
+    line("[%s]   %s %s%s", client, ok ? "✔" : "✘ FAILED:", description, suffix);
     metrics.recordCheck(ok);
     if (ok) passed++;
     else failed++;
   }
 
-  void note(String text) {
-    System.out.printf("[%s]     ℹ %s%n", client, text);
+  void note(String message) {
+    line("[%s]     ℹ %s", client, message);
   }
 
-  int failed() {
-    return failed;
+  /** Records an unexpected exception that aborted the tour. */
+  void abort(Throwable t) {
+    check("demo aborted by " + t.getClass().getSimpleName(), false, t.getMessage());
   }
 
-  void summary() {
-    System.out.printf(
-        "%n[%s] ══ demo complete: %d passed, %d failed ══%n%n", client, passed, failed);
+  Report finish() {
+    line("%n[%s] ══ demo complete: %d passed, %d failed ══%n", client, passed, failed);
+    return new Report(passed, failed, text.toString());
+  }
+
+  private void line(String fmt, Object... args) {
+    String s = String.format(fmt, args);
+    System.out.println(s);
+    text.append(s).append('\n');
   }
 }

@@ -6,14 +6,14 @@ example. The same `crud/steady.js` run against 01 (plaintext), 06 (TLS), 07 (mTL
 08 (tokens) shows what each feature costs while the workload stays the same.
 
 ```bash
-make load                                   # fzf: example → script (preview) → client
-make load EX=01 SCRIPT=crud/ramp            # no prompts
-make load EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
-make load EX=01 SCRIPT=crud/steady RUN=sequential    # one client at a time instead of both at once
-make results                                # browse past runs (or: make results RUN=latest)
+make select-load-test                                          # fzf: example → script (preview) → client
+make select-load-test EX=01 SCRIPT=crud/ramp                   # no prompts
+make select-load-test EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
+make select-load-test EX=01 SCRIPT=crud/steady RUN=sequential  # one client at a time instead of both at once
+make results                                                   # browse past runs (or: make results RUN=latest)
 ```
 
-`make load` starts the example if it isn't running. It then runs k6 (`grafana/k6:2.3.0`) as a
+`make select-load-test` starts the example if it isn't running. It then runs k6 (`grafana/k6:2.3.0`) as a
 throwaway container on the example's Docker network: one k6 process per client, all at once
 (`parallel`) or one after another (`sequential`). At the end it prints a comparison table.
 
@@ -28,7 +28,7 @@ load-testing/
 
 ## Script headers
 
-`make load` reads these comment lines to decide which scripts it offers, and how to run them:
+`make select-load-test` reads these comment lines to decide which scripts it offers, and how to run them:
 
 ```js
 // Description: Latency at a fixed, realistic rate: 1000 req/s of the full 13-op mix for 5m

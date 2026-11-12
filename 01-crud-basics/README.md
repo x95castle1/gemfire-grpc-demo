@@ -6,7 +6,7 @@ HTTP services with an identical `/crud` API, so the same k6 load test drives bot
 compares them.
 
 ```
- k6 (make load) ──HTTP──▶ grpc-client-java :8080 ──gRPC :50051──▶ server1 ──(forward if bucket is remote)──▶ server2
+ k6 (make select-load-test) ──HTTP──▶ grpc-client-java :8080 ──gRPC :50051──▶ server1 ──(forward if bucket is remote)──▶ server2
                 └─HTTP──▶ native-client-java :8080 ─native :40404─▶ server1 / server2 (single-hop: straight to the bucket owner)
                                                      locator :10334 (native discovery) · :50051 (xDS)
  prometheus ◀── clients /metrics · members :7070/metrics/ · cadvisor · k6 (remote write)        grafana :3001
@@ -17,9 +17,9 @@ compares them.
 Prerequisites: Docker, plus the licensed files in [`../gemfire-extensions`](../gemfire-extensions/README.md).
 
 ```bash
-make start EX=01          # cluster, both clients (they run the narrated demo at startup), monitoring
-make logs EX=01           # read the demo: pick grpc-client-java / native-client-java
-make load EX=01           # pick a k6 script, run it against both clients, get a comparison table
+make start EX=01             # cluster, both clients (they run the narrated demo at startup), monitoring
+make logs EX=01              # read the demo: pick grpc-client-java / native-client-java
+make select-load-test EX=01  # pick a k6 script, run it against both clients, get a comparison table
 open http://localhost:3001
 make stop EX=01
 ```
@@ -68,14 +68,14 @@ override it with `?size=`), `HTTP_THREADS`, and the host ports.
 ## Load testing
 
 The k6 scripts live at the repo root in [`../load-testing`](../load-testing/README.md), because
-the same scripts run against every example. To list them, run `make load EX=01` and browse with
+the same scripts run against every example. To list them, run `make select-load-test EX=01` and browse with
 fzf, or run one directly:
 
 ```bash
-make load EX=01 SCRIPT=crud/steady                                   # both clients at once
-make load EX=01 SCRIPT=crud/ramp                                     # each client alone, 100 → 8000 req/s
-make load EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
-make results                                                         # browse past runs
+make select-load-test EX=01 SCRIPT=crud/steady  # both clients at once
+make select-load-test EX=01 SCRIPT=crud/ramp    # each client alone, 100 → 8000 req/s
+make select-load-test EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
+make results                                    # browse past runs
 ```
 
 A 2-minute `crud/steady` run (1,000 req/s per client, both at once, Apple Silicon laptop):
@@ -142,7 +142,7 @@ covered in `10-error-handling`.
 ## What to look for in Grafana
 
 Open **"01 · CRUD basics: native vs gRPC"** at [localhost:3001](http://localhost:3001). Each
-`make load` run appears as a shaded band; use the **load run** dropdown to focus on one run.
+`make select-load-test` run appears as a shaded band; use the **load run** dropdown to focus on one run.
 
 - **Load test (k6) row.** For each client, a solid line (end-to-end) and a dashed line (GemFire
   call). The two clients' solid lines sit closer together than their dashed lines, because HTTP

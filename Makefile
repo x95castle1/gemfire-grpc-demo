@@ -8,13 +8,13 @@ SCRIPT ?=
 RUN ?=
 K6_ARGS ?=
 
-.PHONY: help start stop status logs verify load results
+.PHONY: help start stop status logs verify select-load-test results
 
 help: ## show this menu
 	@printf '\n\033[1mGemFire for gRPC: feature tour\033[0m\n\nUsage: make <target> [VAR=value ...]\n\n'
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} { printf "  \033[36m%-9s\033[0m %s\n", $$1, $$2 }'
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} { printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2 }'
 	@printf '\nVariables (all optional; anything left out is picked with fzf or means "everything"):\n'
-	@printf '  \033[33m%-9s\033[0m %s\n' \
+	@printf '  \033[33m%-17s\033[0m %s\n' \
 		EX      "example number, e.g. EX=01" \
 		CLIENT  "load target: all | grpc-java | native-java" \
 		SCRIPT  "k6 script under load-testing/scripts, e.g. SCRIPT=crud/steady" \
@@ -39,7 +39,7 @@ logs: ## pick containers with fzf, preview their logs, ENTER to follow
 verify: ## smoke-test: every client's demo must pass (no EX: every example)
 	@./scripts/verify.sh $(EX)
 
-load: ## k6 load test against an example's clients, then a native-vs-gRPC table
+select-load-test: ## k6 load test against an example's clients, then a native-vs-gRPC table
 	@EX="$(EX)" CLIENT="$(CLIENT)" SCRIPT="$(SCRIPT)" RUN="$(RUN)" K6_ARGS='$(K6_ARGS)' ./scripts/load.sh
 
 results: ## browse past load-test runs (RUN=latest prints the newest)

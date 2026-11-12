@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 
 dir=load-testing/results
 runs=$(ls -1d "$dir"/*/ 2>/dev/null | sed "s|^$dir/||; s|/$||" | sort -r)
-[ -n "$runs" ] || { echo "No load-test results yet. Run one with: make load"; exit 0; }
+[ -n "$runs" ] || { echo "No load-test results yet. Run one with: make select-load-test"; exit 0; }
 
 pick=${1:-}
 if [ "$pick" = latest ]; then

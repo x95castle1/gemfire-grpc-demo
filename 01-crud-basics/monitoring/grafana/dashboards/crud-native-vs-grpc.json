@@ -109,7 +109,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC\nBoth clients are small HTTP services with the same `/crud` API. Load comes from **k6** (`make load`), and each run shows up as a shaded annotation. **native-java**: `ClientCache` through the locator, PR single-hop. **grpc-java**: plaintext channel straight to `server1:50051`. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call, measured in the client."
+        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC\nBoth clients are small HTTP services with the same `/crud` API. Load comes from **k6** (`make select-load-test`), and each run shows up as a shaded annotation. **native-java**: `ClientCache` through the locator, PR single-hop. **grpc-java**: plaintext channel straight to `server1:50051`. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call, measured in the client."
       },
       "transparent": true
     },

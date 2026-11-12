@@ -21,6 +21,6 @@ gemfire-extensions/*
 **/certs/generated/
 *.local.env
 
-# Load-test output (make load)
+# Load-test output (make select-load-test)
 load-testing/results/*
 !load-testing/results/.gitkeep

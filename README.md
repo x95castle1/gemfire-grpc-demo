@@ -42,13 +42,13 @@ function execution) are **not** available over gRPC. Use the Java, C++ or .NET c
 
 ```bash
 make                 # the menu
-make start           # fzf-pick an example (or: make start EX=01)
-make status          # what's running: containers, state, Grafana/Prometheus URLs
-make logs            # fzf picker: choose containers, live preview, ENTER to follow
-make load            # k6 load test: pick example → script → client, get a native-vs-gRPC table
-make results         # browse past load-test runs
-make stop            # stop everything that's running (or: make stop EX=01)
-make verify          # smoke-test every example (all demo assertions must pass)
+make start             # fzf-pick an example (or: make start EX=01)
+make status            # what's running: containers, state, Grafana/Prometheus URLs
+make logs              # fzf picker: choose containers, live preview, ENTER to follow
+make select-load-test  # k6 load test: pick example → script → client, get a native-vs-gRPC table
+make results           # browse past load-test runs
+make stop              # stop everything that's running (or: make stop EX=01)
+make verify            # smoke-test every example (all demo assertions must pass)
 ```
 
 ## Load testing
@@ -59,9 +59,9 @@ makes it easy to compare features with the workload held constant, for example p
 vs. TLS (06) vs. tokens (08).
 
 ```bash
-make load EX=01 SCRIPT=crud/steady                         # both clients at once, 1000 req/s each
-make load EX=01 SCRIPT=crud/ramp                           # each client alone, 100 → 8000 req/s
-make load EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # override a script's knobs
+make select-load-test EX=01 SCRIPT=crud/steady                         # both clients at once, 1000 req/s each
+make select-load-test EX=01 SCRIPT=crud/ramp                           # each client alone, 100 → 8000 req/s
+make select-load-test EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # override a script's knobs
 ```
 
 Each run prints end-to-end latency (what k6 saw) next to the time inside the GemFire call

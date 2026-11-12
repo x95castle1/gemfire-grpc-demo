@@ -1,0 +1,42 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Both clients expose identical metric names: demo_op_latency_seconds, demo_errors_total, ...
+  - job_name: clients
+    static_configs:
+      - targets: ["grpc-client-java:8080"]
+        labels: { service: grpc-client-java }
+      - targets: ["native-client-java:8080"]
+        labels: { service: native-client-java }
+
+  # GemFire members (HTTP service). GemFire statistics are sampled every 15s
+  # (gemfire.prometheus.metrics.interval), so use rate() windows of 1m or more.
+  # GemFire's own `instance` label (stat instance, e.g. "/crud") becomes `exported_instance`.
+  - job_name: gemfire
+    scrape_interval: 15s
+    metrics_path: /metrics/
+    static_configs:
+      - targets: ["locator:7070"]
+        labels: { node: locator }
+      - targets: ["server1:7070"]
+        labels: { node: server1 }
+      - targets: ["server2:7070"]
+        labels: { node: server2 }
+
+  # Per-container CPU / memory, limited to this example's compose project.
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_project]
+        regex: gemfire-01-crud-basics
+        action: keep
+      - source_labels: [__name__]
+        regex: container_(cpu_usage_seconds_total|memory_working_set_bytes|network_receive_bytes_total|network_transmit_bytes_total)
+        action: keep
+      - source_labels: [container_label_com_docker_compose_service]
+        target_label: service
+      - regex: container_label_.*
+        action: labeldrop

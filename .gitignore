@@ -1,0 +1,22 @@
+# Licensed Broadcom artifacts — never commit
+vendor/*
+!vendor/README.md
+
+# Proto copied in from vendor/ at build time
+**/src/main/proto/gemfire/
+
+# Build outputs
+**/build/
+**/.gradle/
+**/out/
+*.class
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Generated certs / local overrides
+**/certs/generated/
+*.local.env

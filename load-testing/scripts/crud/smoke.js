@@ -1,5 +1,5 @@
 // Description: Quick sanity check: 100 req/s of the full 13-op mix for 30s
-// Examples: all
+// Examples: 01
 // Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: RATE=100 DURATION=30s KEY_SPACE=1000 SIZE=1024

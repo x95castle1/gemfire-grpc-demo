@@ -1,5 +1,5 @@
 // Description: Latency at a fixed, realistic rate: 1000 req/s of the full 13-op mix for 5m
-// Examples: all
+// Examples: 01
 // Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: RATE=1000 DURATION=5m KEY_SPACE=10000 SIZE=1024 MIX=Get=40,Put=15,...

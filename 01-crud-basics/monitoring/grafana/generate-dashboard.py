@@ -100,21 +100,34 @@ def stat(title, targets, x, y, w, h, unit="short", colors=None, desc="", decimal
 NO_DATA = {"type": "special", "options": {"match": "nan", "result": {"text": "–", "color": "text"}}}
 
 
-def ratio_words():
-    """Value mappings that show a ratio (A ÷ B) as words: "22% faster", "254% slower", "same".
+def ratio_words(kind="time"):
+    """Value mappings that show a ratio (A ÷ B) as words, the same wording as the load-test tables.
 
-    Grafana mappings can't interpolate the value, so there is one range per whole percent (and
-    per 10% above 500%). Display only: sorting still uses the underlying ratio."""
+    Under 2×: "22% faster" / "60% slower". From 2× up: "3.1× slower", "12× faster". kind="cpu"
+    says less/more, kind="rate" (throughput, where higher is better) says more/fewer.
+
+    Grafana mappings can't interpolate the value, so there is one range per whole percent under
+    2×, per 0.1× from 2× to 10×, and per 1× from 10× to 100×. Display only: sorting still uses
+    the underlying ratio."""
     GREEN, RED = "#3fa66b", "#e0524c"
+    up, down = {"time": ("slower", "faster"), "cpu": ("more", "less"), "rate": ("more", "fewer")}[kind]
+    up_color, down_color = (GREEN, RED) if kind == "rate" else (RED, GREEN)
+
     def rng(lo, hi, text, color):
         return {"type": "range", "options": {"from": lo, "to": hi, "result": {"text": text, "color": color}}}
+
     m = [NO_DATA, rng(0.995, 1.005, "same", "text")]
-    m += [rng(1 - (n + 0.5) / 100, 1 - (n - 0.5) / 100, f"{n}% faster", GREEN) for n in range(1, 100)]
-    steps = list(range(1, 500)) + list(range(500, 2001, 10))
-    for i, n in enumerate(steps):
-        half = 0.5 if n < 500 else 5
-        m.append(rng(1 + (n - half) / 100, 1 + (n + half) / 100, f"{n}% slower", RED))
-    m.append(rng(1 + 2005 / 100, 1e12, "over 2000% slower", RED))
+    # Under 2×, as percentages: A ÷ B = 1 ± n/100.
+    m += [rng(1 - (n + 0.5) / 100, 1 - (n - 0.5) / 100, f"{n}% {down}", down_color) for n in range(1, 50)]
+    m += [rng(1 + (n - 0.5) / 100, 1 + (n + 0.5) / 100, f"{n}% {up}", up_color) for n in range(1, 100)]
+    # From 2×, as multiples: x = A ÷ B (up) or B ÷ A (down).
+    steps = [(round(x / 10, 1), 0.05, f"{x / 10:.1f}") for x in range(20, 100)] + [(x, 0.5, str(x)) for x in range(10, 101)]
+    for x, half, label in steps:
+        lo = 1.995 if x == 2.0 else x - half   # 2.0× picks up where "99% slower" ends
+        m.append(rng(lo, x + half, f"{label}× {up}", up_color))
+        m.append(rng(1 / (x + half), 0.505 if x == 2.0 else 1 / (x - half), f"{label}× {down}", down_color))
+    m.append(rng(100.5, 1e12, f"over 100× {up}", up_color))
+    m.append(rng(1e-12, 1 / 100.5, f"over 100× {down}", down_color))
     return m
 
 
@@ -302,7 +315,7 @@ tbl_targets = [target(over_range(pct, GF, c).replace("sum(", "sum by (op) (", 1)
 JAVA_RATIO, GO_RATIO = "grpc-java vs native", "grpc-go vs native"
 panels.append({
     "type": "table", "id": nid(), "title": "Per-operation GemFire call latency (selected runs, whole time range)",
-    "description": "java = grpc-java, go = grpc-go. The \"vs native\" columns compare p50s: \"254% slower\" means that gRPC client's median call took 254% longer than native's. Native GetAndPut, "
+    "description": "java = grpc-java, go = grpc-go. The \"vs native\" columns compare p50s: \"3.5× slower\" means that gRPC client's median call took 3.5 times as long as native's; under 2× it's a percentage (\"60% slower\"). Native GetAndPut, "
                    "Remove and GetAndRemove are two round trips: client put()/remove() don't "
                    "return the old value. See the README mapping table.",
     "datasource": DS, "gridPos": {"h": 15, "w": 24, "x": 0, "y": y}, "targets": tbl_targets,

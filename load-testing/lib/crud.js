@@ -86,7 +86,7 @@ export function randomKey(space = KEY_SPACE) {
 export function preload(count = KEY_SPACE, size = SIZE) {
   const res = http.post(`${BASE_URL}/crud/preload?count=${count}&size=${size}`, null,
     { timeout: '300s', tags: { name: 'crud/preload' } });
-  if (res.status !== 200) fail(`preload failed: ${res.status} ${res.body}`);
+  if (res.status !== 200) fail(`preload failed: ${res.status ? `${res.status} ${res.body}` : res.error}`);
   console.log(`preloaded ${count} keys of ${size} B into ${BASE_URL}`);
 }
 

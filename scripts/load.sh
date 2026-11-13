@@ -29,6 +29,8 @@ for tool in docker jq curl; do
 done
 [ $missing -eq 0 ] || exit 1
 # Interactive pickers need a terminal. Without one (CI, scripts), fail fast instead of hanging.
+# fzf exits non-zero when you press Esc / Ctrl-C (130) or it fails (2). Say so instead of quitting silently.
+nothingPicked() { echo "${dim}Nothing picked (${1}), so nothing ran.${reset}" >&2; exit 0; }
 needFzf() {
   [ -t 0 ] && [ -t 1 ] || die "no terminal to choose $1 interactively: pass it on the command line (EX=, SCRIPT=, CLIENT=)"
   command -v fzf >/dev/null || die "fzf is required to choose $1 interactively (brew install fzf), or pass it on the command line"
@@ -58,7 +60,7 @@ else
     needFzf "the example"
     if [ ${#running[@]} -eq 0 ]; then choices=("${all[@]}"); else choices=("${running[@]}"); fi
     dir=$(printf '%s\n' "${choices[@]}" | fzf --height=40% --reverse \
-      --header="$([ ${#running[@]} -eq 0 ] && echo 'Nothing is running. Pick an example to start and load test:' || echo 'Example to load test:')") || exit 0
+      --header="$([ ${#running[@]} -eq 0 ] && echo 'Nothing is running. Pick an example to start and load test:' || echo 'Example to load test:')") || nothingPicked "example picker closed"
   fi
 fi
 num=${dir%%-*}
@@ -70,20 +72,24 @@ fi
 
 # --- 2. Wait for the client services ----------------------------------------------------------
 clientServices() { (cd "$dir" && docker compose config --services) | grep -E -- '-client-' ; }
-echo -n "Waiting for ${dir}'s clients to be healthy"
+svcToClient() { echo "$1" | sed 's/-client-/-/'; }   # grpc-client-java -> grpc-java
+# One status line, rewritten in place: which client is in which state (a client that just
+# started runs its narrated demo first, so "starting" for 20-40 s is normal).
+waitStart=$SECONDS
 for _ in $(seq 1 90); do
-  unhealthy=0
+  unhealthy=0; states=""
   for svc in $(clientServices); do
     h=$(cd "$dir" && docker compose ps --format '{{.Health}}' "$svc" 2>/dev/null)
     [ "$h" = healthy ] || unhealthy=1
+    states="${states}  $(svcToClient "$svc") ${h:-not running}"
   done
+  printf '\r\e[2KWaiting for %s'"'"'s clients (%ds):%s' "$dir" $((SECONDS - waitStart)) "$states"
   [ $unhealthy -eq 0 ] && break
-  echo -n "."; sleep 2
+  sleep 2
 done
 echo
 [ $unhealthy -eq 0 ] || die "clients didn't become healthy. Check: make logs EX=${num}"
 
-svcToClient() { echo "$1" | sed 's/-client-/-/'; }   # grpc-client-java -> grpc-java
 found=(); for svc in $(clientServices); do found+=("$(svcToClient "$svc")"); done
 # Fixed order (the baseline first), whatever the order in docker-compose.yml; then any others.
 available=()
@@ -113,12 +119,16 @@ else
          done | column -t -s $'\t' |
          fzf --height=60% --reverse --header="Load test for ${dir}:" \
            --preview 'sed -n "1,/^import/p" load-testing/scripts/{1} | grep "^//" | sed "s|^// ||"; echo; sed -n "/export const options/,/^});/p" load-testing/scripts/{1}' \
-           --preview-window=right,55%,wrap | awk '{print $1}') || exit 0
-  [ -n "$file" ] || exit 0
+           --preview-window=right,55%,wrap | awk '{print $1}')
+  [ -n "$file" ] || nothingPicked "script picker closed"
   file="load-testing/scripts/$file"
 fi
 SCRIPT=${file#load-testing/scripts/}; SCRIPT=${SCRIPT%.js}
 supported=$(header "$file" Clients | tr -d ' ')
+# Bulk scripts (bulk/*) count entries as well as requests: their tables and live lines show entries/s.
+bulk=0; [[ "$SCRIPT" == bulk/* ]] && bulk=1
+# "// Breakdown: mode=stream,unary×16,unary×1": a tag whose values each get their own table rows.
+breakdown=$(header "$file" Breakdown | tr -d ' ')
 
 # --- 4. Client(s) ------------------------------------------------------------------------------
 targets=()
@@ -127,7 +137,7 @@ if [ -z "$CLIENT" ]; then
   if [ ${#targets[@]} -gt 1 ] && [ -t 0 ] && [ -t 1 ]; then
     needFzf "the client"
     CLIENT=$(printf '%s\n' all "${targets[@]}" | fzf --height=30% --reverse \
-      --header="Which client? (all = compare them)") || exit 0
+      --header="Which client? (all = compare them)") || nothingPicked "client picker closed"
   else
     CLIENT=all
   fi
@@ -212,6 +222,7 @@ liveFetch() {   # refreshes the live_* values from Prometheus, in one query
   q="$q or $(hq e2e 0.5 k6_http_req_duration_seconds) or $(hq gf50 0.5 k6_gemfire_call_duration_seconds)"
   q="$q or $(hq gf99 0.99 k6_gemfire_call_duration_seconds)"
   q="$q or label_replace(sum by (client) (k6_http_reqs_total{${sel}, expected_response=\"false\"}), \"m\", \"failed\", \"\", \"\")"
+  [ $bulk -eq 1 ] && q="$q or label_replace(sum by (client) (rate(k6_bulk_entries_total{${sel}}[15s])), \"m\", \"eps\", \"\", \"\")"
   out=$(curl -s --max-time 2 "http://localhost:${promPort}/api/v1/query" --data-urlencode "query=$q" |
         jq -r '.data.result[]? | "\(.metric.m) \(.metric.client) \(.value[1])"' 2>/dev/null)
   while read -r m c v; do [ -n "$c" ] && kvSet "live_$m" "$c" "$v"; done <<< "$out"
@@ -235,21 +246,28 @@ liveLines() {   # prints the screen's lines for the current state
     elif grep -q 'preloaded' "$log" 2>/dev/null; then
       line="starting scenario..."
     else
-      line="${dim}setup: preloading keys...${reset}"
+      line="${dim}setup...${reset}"
     fi
     status=""
     case $(kvGet codes "$c") in
       "") ;;
       0) status="  ${green}✓ done${reset}" ;;
       99) status="  ${red}✘ thresholds crossed${reset}" ;;
-      *) status="  ${red}✘ k6 exit $(kvGet codes "$c"), see ${c}.log${reset}" ;;
+      *) status="  ${red}✘ $(failReason "$c"), see ${c}.log${reset}" ;;
     esac
     printf '  %s%s%-12s%s %s%s\n' "$color" "$bold" "$c" "$reset" "$line" "$status"
     rps=$(kvGet live_rps "$c"); failed=$(kvGet live_failed "$c")
-    printf '  %-12s %s%s req/s · E2E p50 %s · GF p50 %s · GF p99 %s · %s failed%s\n' '' "$dim" \
-      "$(awk -v r="$rps" 'BEGIN { if (r == "") printf "-"; else printf "%.1f", r }')" \
-      "$(ms "$(kvGet live_e2e "$c")")" "$(ms "$(kvGet live_gf50 "$c")")" \
-      "$(ms "$(kvGet live_gf99 "$c")")" "${failed:-0}" "$reset"
+    if [ $bulk -eq 1 ]; then   # bulk calls: entries/s is the throughput that matters
+      printf '  %-12s %s%s entries/s · %s calls/s · call p50 %s · p99 %s · %s failed%s\n' '' "$dim" \
+        "$(awk -v r="$(kvGet live_eps "$c")" 'BEGIN { if (r == "") printf "-"; else printf "%.0f", r }')" \
+        "$(awk -v r="$rps" 'BEGIN { if (r == "") printf "-"; else printf "%.1f", r }')" \
+        "$(ms "$(kvGet live_gf50 "$c")")" "$(ms "$(kvGet live_gf99 "$c")")" "${failed:-0}" "$reset"
+    else
+      printf '  %-12s %s%s req/s · E2E p50 %s · GF p50 %s · GF p99 %s · %s failed%s\n' '' "$dim" \
+        "$(awk -v r="$rps" 'BEGIN { if (r == "") printf "-"; else printf "%.1f", r }')" \
+        "$(ms "$(kvGet live_e2e "$c")")" "$(ms "$(kvGet live_gf50 "$c")")" \
+        "$(ms "$(kvGet live_gf99 "$c")")" "${failed:-0}" "$reset"
+    fi
   done
   echo
   printf '  %selapsed %s · Grafana http://localhost:%s · full k6 output: %s/<client>.log · Ctrl-C stops all%s\n' \
@@ -332,21 +350,33 @@ fi
 trap - INT TERM
 
 # --- 6. Comparison table -----------------------------------------------------------------------
-cpuPerReq() {   # client -> client container CPU µs per request over its run window (cAdvisor)
-  local c=$1 svc secs reqs cpu end
+cpuPerReq() {   # client [jq path, scale] -> client CPU µs per request (or per 1k entries) over its run (cAdvisor)
+  local c=$1 path=${2:-.metrics.http_reqs.count} scale=${3:-1} svc secs reqs cpu end
   svc=$(echo "$c" | sed 's/-/-client-/')
   end=$(kvGet ended "$c")
   secs=$(( (end - $(kvGet started "$c")) / 1000 )); [ "$secs" -lt 15 ] && secs=15
-  reqs=$(jq -r '.metrics.http_reqs.count // 0' "$results/${c}.json" 2>/dev/null)
+  reqs=$(jq -r "${path} // 0" "$results/${c}.json" 2>/dev/null)
   sleep 1
   cpu=$(curl -s "http://localhost:${promPort}/api/v1/query" \
           --data-urlencode "query=sum(increase(container_cpu_usage_seconds_total{service=\"${svc}\"}[${secs}s]))" \
           --data-urlencode "time=$(( end / 1000 ))" | jq -r '.data.result[0].value[1] // empty' 2>/dev/null)
   if [ -n "$cpu" ] && [ "${reqs:-0}" != 0 ]; then
-    awk -v cpu="$cpu" -v r="$reqs" 'BEGIN { printf "%.0f", cpu / r * 1e6 }'
+    awk -v cpu="$cpu" -v r="$reqs" -v k="$scale" 'BEGIN { printf "%.0f", cpu / r * 1e6 * k }'
   else
     echo "-"
   fi
+}
+
+failReason() {   # client -> why its k6 run failed, in a few words
+  local code err
+  code=$(kvGet codes "$1")
+  # k6 logs the script's error as: level=error msg="GoError: preload failed: 404 ..."
+  err=$(grep -m1 'level=error' "$results/$1.log" 2>/dev/null | sed -E 's/.*msg="(GoError: )?//; s/(\\n|\\"|").*//; s/ *[{(]$//' | cut -c1-70)
+  case $code in
+    107) echo "setup failed${err:+: $err}" ;;
+    108) echo "aborted${err:+: $err}" ;;
+    *) echo "k6 exit ${code}${err:+: $err}" ;;
+  esac
 }
 
 table() {
@@ -355,8 +385,11 @@ table() {
   printf '%-21s %10s %8s %7s │ %11s %11s %11s │ %11s %11s │ %9s\n' '' '' '' '' '(ms)' '(ms)' '(ms)' '(ms)' '(ms)' '(µs)'
   for c in "${targets[@]}"; do
     f="$results/${c}.json"
-    cpu=$(cpuPerReq "$c")
-    if [ -f "$f" ]; then
+    code=$(kvGet codes "$c")
+    # Only a run that got to its scenario (exit 0, or 99 = thresholds crossed) has numbers worth
+    # showing. Otherwise the summary holds setup's requests at most, so print dashes.
+    if [ -f "$f" ] && { [ "$code" = 0 ] || [ "$code" = 99 ]; }; then
+      cpu=$(cpuPerReq "$c")
       read -r reqs rate failed p50 p95 p99 g50 g99 < <(jq -r '.metrics as $m | [
           $m.http_reqs.count, ($m.http_reqs.rate*10|round/10),
           (($m.http_req_failed.value // 0)*1000|round/10),
@@ -369,11 +402,10 @@ table() {
     else
       printf '%-21s %10s %8s %7s │ %11s %11s %11s │ %11s %11s │ %9s  ' "$c" - - - - - - - - -
     fi
-    code=$(kvGet codes "$c")
     case $code in
       0) echo PASS ;;
       99) echo "FAIL (thresholds crossed)" ;;
-      *) echo "FAIL (k6 exit ${code}, see ${c}.log)" ;;
+      *) echo "FAIL ($(failReason "$c"), see ${c}.log)" ;;
     esac
   done
   # Ratio rows: each gRPC client against native-java, then the two gRPC stacks against each other.
@@ -382,17 +414,123 @@ table() {
   ratioRow grpc-go grpc-java
 }
 
-# How A's value compares with B's, in words: "22% faster" / "60% slower" for latency, "43% less" /
-# "62% more" for CPU. Green = better, red = worse (colors only in a terminal).
-ratio() {   # a b width kind(time|cpu)
+resultText() {   # client -> PASS / FAIL (why)
+  case $(kvGet codes "$1") in
+    0) echo PASS ;;
+    99) echo "FAIL (thresholds crossed)" ;;
+    *) echo "FAIL ($(failReason "$1"), see $1.log)" ;;
+  esac
+}
+ranOk() { local code; code=$(kvGet codes "$1"); [ -f "$results/$1.json" ] && { [ "$code" = 0 ] || [ "$code" = 99 ]; }; }
+
+# Bulk scripts: one call moves many entries, so the table leads with entries/s, and CPU is per
+# 1,000 entries. Calls take milliseconds to seconds; latencies are per call.
+bulkTable() {
+  printf '%-21s %8s %11s %10s %7s │ %11s %11s %11s │ %11s %11s │ %9s  %s\n' \
+    CLIENT CALLS ENTRIES 'ENTRIES/S' FAILED 'E2E p50' 'p95' 'p99' 'GF p50' 'p99' 'CPU/1k' RESULT
+  printf '%-21s %8s %11s %10s %7s │ %11s %11s %11s │ %11s %11s │ %9s\n' '' '' '' '' '' '(ms)' '(ms)' '(ms)' '(ms)' '(ms)' '(µs)'
+  for c in "${targets[@]}"; do
+    f="$results/${c}.json"
+    if ranOk "$c"; then
+      cpu=$(cpuPerReq "$c" .metrics.bulk_entries.count 1000)
+      read -r calls ents eps failed p50 p95 p99 g50 g99 < <(jq -r '.metrics as $m | [
+          $m.http_reqs.count, ($m.bulk_entries.count // 0), (($m.bulk_entries.rate // 0)|round),
+          (($m.http_req_failed.value // 0)*1000|round/10),
+          $m.http_req_duration.med, $m.http_req_duration["p(95)"], $m.http_req_duration["p(99)"],
+          ($m.gemfire_call_duration.med // 0), ($m.gemfire_call_duration["p(99)"] // 0)
+        ] | map(tostring) | join(" ")' "$f")
+      kvSet row "$c" "$p50 $p95 $p99 $g50 $g99 $cpu $eps"
+      printf '%-21s %8s %11s %10s %6s%% │ %11.3f %11.3f %11.3f │ %11.3f %11.3f │ %9s  %s\n' \
+        "$c" "$calls" "$ents" "$eps" "$failed" "$p50" "$p95" "$p99" "$g50" "$g99" "$cpu" "$(resultText "$c")"
+    else
+      printf '%-21s %8s %11s %10s %7s │ %11s %11s %11s │ %11s %11s │ %9s  %s\n' "$c" - - - - - - - - - - "$(resultText "$c")"
+    fi
+  done
+  bulkRatioRow grpc-java native-java
+}
+bulkRatioRow() {   # a b -> "a vs b" row: entries/s, latencies and CPU, if both clients ran
+  [ -n "$(kvGet row "$1")" ] && [ -n "$(kvGet row "$2")" ] || return 0
+  local a b
+  read -r -a a <<< "$(kvGet row "$1")"; read -r -a b <<< "$(kvGet row "$2")"
+  printf '%-21s %8s %11s %s %7s │ %s %s %s │ %s %s │ %s\n' "${1} vs ${2/native-java/native}" '' '' \
+    "$(ratio "${a[6]}" "${b[6]}" 10 rate)" '' \
+    "$(ratio "${a[0]}" "${b[0]}" 11 time)" "$(ratio "${a[1]}" "${b[1]}" 11 time)" "$(ratio "${a[2]}" "${b[2]}" 11 time)" \
+    "$(ratio "${a[3]}" "${b[3]}" 11 time)" "$(ratio "${a[4]}" "${b[4]}" 11 time)" "$(ratio "${a[5]}" "${b[5]}" 9 cpu)"
+}
+
+# Breakdown table (scripts with a "// Breakdown: tag=v1,v2,..." header): one row per client and
+# tag value, from the tagged sub-metrics the script's thresholds put in the summary export.
+# entries/s = bulk_entries{tag} ÷ bulk_slice_seconds{tag}, the time that slice ran.
+label() {   # text width -> text left-aligned in width columns ("·" and "×" are 2 bytes each in UTF-8)
+  local bytes cont
+  bytes=$(printf '%s' "$1" | LC_ALL=C wc -c | tr -d ' ')
+  cont=$(printf '%s' "$1" | LC_ALL=C tr -cd '\200-\277' | wc -c | tr -d ' ')
+  printf '%s%*s' "$1" $(( $2 > bytes - cont ? $2 - bytes + cont : 0 )) ''
+}
+
+breakdownTable() {
+  local tag=${breakdown%%=*} values v i c f line first
+  IFS=',' read -r -a values <<< "${breakdown#*=}"
+  echo
+  echo "By ${tag}: each ${tag} ran on its own, one after another (rows compare within a client, then across clients)"
+  printf '%s │ %8s %11s %10s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS ENTRIES 'ENTRIES/S' 'GF p50' 'p99'
+  printf '%s │ %8s %11s %10s │ %11s %11s\n' "$(label '' 36)" '' '' '' '(ms)' '(ms)'
+  for c in "${targets[@]}"; do
+    ranOk "$c" || continue
+    f="$results/${c}.json"
+    for i in "${!values[@]}"; do
+      v=${values[$i]}
+      line=$(jq -r --arg t "${tag}:${v}" '.metrics as $m | ($m["bulk_slice_seconds{" + $t + "}"].count // 0) as $secs | [
+          ($m["http_reqs{" + $t + "}"].count // 0), ($m["bulk_entries{" + $t + "}"].count // 0),
+          (if $secs > 0 then (($m["bulk_entries{" + $t + "}"].count // 0) / $secs | round) else 0 end),
+          ($m["gemfire_call_duration{" + $t + "}"].med // 0), ($m["gemfire_call_duration{" + $t + "}"]["p(99)"] // 0)
+        ] | map(tostring) | join(" ")' "$f")
+      kvSet "br${i}" "$c" "$line"
+      read -r calls ents eps g50 g99 <<< "$line"
+      printf '%s │ %8s %11s %10s │ %11.3f %11.3f\n' "$(label "${c} · ${v}" 36)" "$calls" "$ents" "$eps" "$g50" "$g99"
+    done
+    for i in "${!values[@]}"; do
+      [ "$i" -eq 0 ] && continue
+      breakdownRatio "${c} · ${values[$i]} vs ${values[0]}" "$(kvGet "br${i}" "$c")" "$(kvGet br0 "$c")"
+    done
+  done
+  if ranOk grpc-java && ranOk native-java; then
+    for i in "${!values[@]}"; do
+      breakdownRatio "grpc-java vs native · ${values[$i]}" "$(kvGet "br${i}" grpc-java)" "$(kvGet "br${i}" native-java)"
+    done
+  fi
+}
+breakdownRatio() {   # label "calls entries eps p50 p99" (a) "..." (b)
+  local a b
+  read -r -a a <<< "$2"; read -r -a b <<< "$3"
+  [ ${#a[@]} -eq 5 ] && [ ${#b[@]} -eq 5 ] || return 0
+  printf '%s │ %8s %11s %s │ %s %s\n' "$(label "$1" 36)" '' '' "$(ratio "${a[2]}" "${b[2]}" 10 rate)" \
+    "$(ratio "${a[3]}" "${b[3]}" 11 time)" "$(ratio "${a[4]}" "${b[4]}" 11 time)"
+}
+
+# How A's value compares with B's, in words. Under 2×: "22% faster" / "60% slower" for latency,
+# "43% less" / "62% more" for CPU, "30% more" / "30% fewer" for throughput (entries/s). From 2× up:
+# "3.1× slower", "12× faster", "4.0× more". Green = better, red = worse (colors only in a terminal).
+ratio() {   # a b width kind(time|cpu|rate)
   awk -v a="$1" -v b="$2" -v w="$3" -v kind="$4" -v color="$interactive" 'BEGIN {
-    if (!(b + 0 > 0) || a == "-") { printf "%*s", w, "-"; exit }
-    p = (a / b - 1) * 100; n = sprintf("%.0f", p < 0 ? -p : p)
-    if (n == "0") { printf "%*s", w, "same"; exit }
-    word = kind == "cpu" ? (p < 0 ? "less" : "more") : (p < 0 ? "faster" : "slower")
-    cell = sprintf("%*s", w, n "% " word)
-    if (color == 1) cell = (p < 0 ? "\033[32m" : "\033[31m") cell "\033[0m"
-    printf "%s", cell
+    if (!(b + 0 > 0) || !(a + 0 > 0) || a == "-") { printf "%*s", w, "-"; exit }
+    r = a / b
+    up = kind == "cpu" ? "more" : kind == "rate" ? "more" : "slower"
+    down = kind == "cpu" ? "less" : kind == "rate" ? "fewer" : "faster"
+    better = kind == "rate" ? r > 1 : r < 1
+    if (r >= 2 || r <= 0.5) {
+      x = r >= 2 ? r : 1 / r
+      cell = sprintf(x < 10 ? "%.1f× %s" : "%.0f× %s", x, r > 1 ? up : down)
+      visible = length(cell) - 1   # "×" is 2 bytes; awk counts bytes
+    } else {
+      n = sprintf("%.0f", (r < 1 ? 1 - r : r - 1) * 100)
+      if (n == "0") { printf "%*s", w, "same"; exit }
+      cell = n "% " (r > 1 ? up : down)
+      visible = length(cell)
+    }
+    pad = sprintf("%*s", (w > visible ? w - visible : 0), "")
+    if (color == 1) cell = (better ? "\033[32m" : "\033[31m") cell "\033[0m"
+    printf "%s%s", pad, cell
   }'
 }
 ratioRow() {   # a b -> "a vs b" row: how a's latency and CPU compare with b's, if both clients ran
@@ -408,10 +546,16 @@ echo
 {
   echo "━━ ${dir} · ${SCRIPT} · ${RUN} · ${runId} ━━"
   [ -n "$K6_ARGS" ] && echo "k6 args: $K6_ARGS"
-  echo "E2E = HTTP request as k6 saw it. GF = time inside the GemFire call (client-reported)."
-  [ ${#targets[@]} -gt 1 ] && echo "\"A vs B\" rows: how A did compared with B (e.g. \"grpc-go vs grpc-java: 22% faster\" = grpc-go was faster)."
+  if [ $bulk -eq 1 ]; then
+    echo "One call = one bulk operation (a stream, or the Region calls doing the same job). ENTRIES/S = entries moved per second."
+    echo "E2E = HTTP request as k6 saw it. GF = time inside the GemFire call(s) (client-reported). CPU/1k = client CPU per 1,000 entries."
+  else
+    echo "E2E = HTTP request as k6 saw it. GF = time inside the GemFire call (client-reported)."
+  fi
+  [ ${#targets[@]} -gt 1 ] && echo "\"A vs B\" rows: how A did compared with B (e.g. \"grpc-go vs grpc-java: 22% faster\" = grpc-go was faster; \"3.1× slower\" = took 3.1 times as long)."
   echo
-  table
+  if [ $bulk -eq 1 ]; then bulkTable; else table; fi
+  [ -n "$breakdown" ] && breakdownTable
 } | tee "$results/summary.raw"
 sed $'s/\e\\[[0-9;]*m//g' "$results/summary.raw" > "$results/summary.txt" && rm -f "$results/summary.raw"   # no colors in the file
 echo

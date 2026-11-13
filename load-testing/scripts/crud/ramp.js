@@ -1,5 +1,5 @@
 // Description: Find the knee: ramp each client alone from 100 to 8000 req/s, then hold
-// Examples: all
+// Examples: 01
 // Clients: native-java, grpc-java, grpc-go
 // Run: sequential
 // Env: PEAK=8000 KEY_SPACE=10000 SIZE=1024 MIX=Get=40,Put=15,...

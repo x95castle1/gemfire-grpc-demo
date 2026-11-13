@@ -23,7 +23,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 | # | Example | gRPC features | Native Java counterpart | Grafana | Status |
 |---|---|---|---|---|---|
 | 01 | [crud-basics](01-crud-basics/) | All 13 unary RPCs from Java **and Go**; string/int32/int64 keys; every scalar `Value` type; direct `dns:///` connection | Region API (`put`, `putIfAbsent`, `replace`, `containsKeyOnServer`, `sizeOnServer`…) | [:3001](http://localhost:3001) | ✅ |
-| 02 | bulk-streaming | `PutStream`, `GetStream`, `RemoveStream`, `KeySetStream` | `putAll`, `getAll`, `removeAll`, `keySetOnServer` | :3002 | planned |
+| 02 | [bulk-streaming](02-bulk-streaming/) | `PutStream`, `GetStream`, `RemoveStream`, `KeySetStream`; chunking, flow control, non-transactional failure; vs. one unary call per entry | `putAll`, `getAll`, `removeAll`, `keySetOnServer` (vs. `put`/`get`/`remove` per entry) | [:3002](http://localhost:3002) | ✅ |
 | 03 | oql-query | `Query`: parameters, `field_names`, batching, NULL/UNDEFINED | `QueryService` | :3003 | planned |
 | 04 | structured-values | `google.protobuf.Any`, descriptor JAR deploy, OQL into fields; Go writes and Java reads | PDX | :3004 | planned |
 | 05 | xds-discovery | Locator xDS, round-robin, failover (Java + Go) | Locator pool, single-hop | :3005 | planned |
@@ -65,17 +65,18 @@ make select-load-test EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # overrid
 
 Each run prints end-to-end latency (what k6 saw) next to the time inside the GemFire call
 (reported by the client) and CPU per request, then says in words how each gRPC client compares
-with native, e.g. `grpc-java vs native: 73% slower`. It saves everything under
+with native, e.g. `grpc-java vs native: 73% slower` or, from 2× up, `3.0× slower`. It saves everything under
 `load-testing/results/` and adds an annotation to the example's Grafana dashboard.
 
 ## Conventions used by every example
 
 - **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN`/`83NN` on the host). Each
   runs a narrated demo with assertions at startup (`POST /demo` re-runs it; 200 means everything
-  passed) and serves `/crud/*` for load tests.
-- **The same metric names in every client**, with buckets from 50 µs to 2.5 s:
-  - `demo_op_latency_seconds{client,region,op,code}`: one `/crud` operation's GemFire work,
+  passed) and serves the example's API for load tests (`/crud/*` in 01, `/bulk/*` in 02).
+- **The same metric names in every client**, with buckets from 50 µs to 2.5 s (to 60 s in 02):
+  - `demo_op_latency_seconds{client,region,op,code}`: one API call's GemFire work,
     failures included (`code` is `OK`, a gRPC status code, or a native exception class).
+  - `demo_entries_total{client,region,op}` (02): entries a bulk call moved.
   - `demo_rpc_duration_seconds{client,region,method,code}`: every gRPC call, streaming ones
     included, recorded by a gRPC client interceptor (gRPC clients only).
 - **Colors** follow the client in every dashboard: native-java is blue, grpc-java is orange, and

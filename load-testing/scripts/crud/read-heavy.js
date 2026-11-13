@@ -1,5 +1,5 @@
 // Description: Cache-style traffic: 90% Get / 10% Put at 2000 req/s for 3m
-// Examples: all
+// Examples: 01
 // Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: RATE=2000 DURATION=3m KEY_SPACE=10000 SIZE=1024

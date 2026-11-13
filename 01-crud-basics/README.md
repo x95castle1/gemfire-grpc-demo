@@ -98,8 +98,8 @@ CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95   
 native-java               120002    997.9      0% │       0.256       0.694       2.502 │       0.102       0.761 │       187  PASS
 grpc-java                 119997    996.3      0% │       0.455       1.152       4.582 │       0.311       3.088 │       266  PASS
 grpc-go                   119986    995.7      0% │       0.381       0.958       3.292 │       0.258       2.398 │       216  PASS
-grpc-java vs native                               │  78% slower  66% slower  83% slower │ 205% slower 306% slower │  42% more
-grpc-go vs native                                 │  49% slower  38% slower  32% slower │ 153% slower 215% slower │  16% more
+grpc-java vs native                               │  78% slower  66% slower  83% slower │ 3.0× slower 4.1× slower │  42% more
+grpc-go vs native                                 │  49% slower  38% slower  32% slower │ 2.5× slower 3.2× slower │  16% more
 grpc-go vs grpc-java                              │  16% faster  17% faster  28% faster │  17% faster  22% faster │  19% less
 ```
 
@@ -108,9 +108,9 @@ grpc-go vs grpc-java                              │  16% faster  17% faster  2
   overhead, so the end-to-end comparison understates the difference between the clients, and
   the GF comparison shows it.
 - **CPU/REQ** is the client container's CPU (from cAdvisor) divided by requests.
-- **"A vs B" rows** say how A did compared with B, column by column: `grpc-go vs grpc-java: 22%
-  faster` means grpc-go's number was 22% lower. In the CPU column it's `less` or `more`. Over
-  100% means more than twice as long: `200% slower` takes three times as long. The rows compare
+- **"A vs B" rows** say how A did compared with B, column by column: `grpc-go vs grpc-java: 17%
+  faster` means grpc-go's number was 17% lower. From 2× up the gap is a multiple: `3.0× slower`
+  means A took 3 times as long as B. In the CPU column it's `less` or `more`. The rows compare
   each gRPC client with native, then the two gRPC libraries with each other.
 - Quote numbers from `crud/steady` or `crud/saturate`, not `crud/smoke`. At 100 req/s, CPU/REQ
   mostly measures background overhead (JVM housekeeping, GC, metrics scrapes) spread over very
@@ -125,8 +125,8 @@ CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95   
 native-java               655329    32685      0% │       0.368       0.916       1.893 │       0.090       0.610 │        90  PASS
 grpc-java                 336869    16734      0% │       0.808       1.585       2.763 │       0.548       1.854 │       153  PASS
 grpc-go                   368959  18344.8      0% │       0.679       1.794       2.555 │       0.476       1.956 │        88  PASS
-grpc-java vs native                               │ 120% slower  73% slower  46% slower │ 509% slower 204% slower │  70% more
-grpc-go vs native                                 │  85% slower  96% slower  35% slower │ 429% slower 221% slower │   2% less
+grpc-java vs native                               │ 2.2× slower  73% slower  46% slower │ 6.1× slower 3.0× slower │  70% more
+grpc-go vs native                                 │  85% slower  96% slower  35% slower │ 5.3× slower 3.2× slower │   2% less
 grpc-go vs grpc-java                              │  16% faster  13% slower   8% faster │  13% faster   6% slower │  42% less
 ```
 
@@ -185,7 +185,7 @@ same numbers as the terminal table.
   overhead is about the same in every client.
 - **Per-operation latency table.** Every op's p50 for all three clients, plus "grpc-java vs
   native" and "grpc-go vs native" columns in words (red = slower, green = faster), sorted by the
-  first. Single-call ops come out about 110–250% slower over gRPC. The ops where native needs two
+  first. Single-call ops come out about 2–3.5× slower over gRPC. The ops where native needs two
   calls (`GetAndPut`, `GetAndRemove`, `Remove`) drop to about 10–90% slower, and the atomic gRPC
   call becomes the better deal.
 - **Puts forwarded to the owning server.** Both gRPC clients send everything to `server1`, so

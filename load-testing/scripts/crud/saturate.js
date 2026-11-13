@@ -1,5 +1,5 @@
 // Description: Maximum throughput: 64 VUs in a closed loop (no pacing) for 2m, each client alone
-// Examples: all
+// Examples: 01
 // Clients: native-java, grpc-java, grpc-go
 // Run: sequential
 // Env: VUS=64 DURATION=2m KEY_SPACE=10000 SIZE=1024 MIX=Get=40,Put=15,...

@@ -45,8 +45,10 @@ Without a terminal (CI, scripts), k6 runs quietly and only the comparison table 
 
 ```
 load-testing/
-├── lib/crud.js        # shared helpers: op mix, /crud calls, preload, options, gemfire_call_duration trend
-├── scripts/crud/      # smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
+├── lib/crud.js        # /crud helpers (01): op mix, calls, preload, options, gemfire_call_duration trend
+├── lib/bulk.js        # /bulk helpers (02): bulk calls, the bulk_entries counter, modes, per-VU key ranges
+├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
+├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 └── results/           # git-ignored; one folder per run (see below)
 ```
 
@@ -56,11 +58,15 @@ load-testing/
 
 ```js
 // Description: Latency at a fixed, realistic rate: 1000 req/s of the full 13-op mix for 5m
-// Examples: all                              ← "all", or a list like "02, 11"
+// Examples: 01                               ← "all", or a list like "02, 11"
 // Clients: native-java, grpc-java, grpc-go   ← clients the script can target
 // Run: parallel                              ← default run style; RUN= overrides it
+// Breakdown: mode=stream,unary×16,unary×1    ← optional: a tag whose values get their own table rows
 // Env: RATE=1000 DURATION=5m ...             ← knobs, passed with K6_ARGS="-e RATE=3000"
 ```
+
+Scripts that load the cluster as hard as they can (closed-loop VUs) default to `Run: sequential`,
+so each client gets the cluster to itself. Light, fixed-rate scripts run all clients at once.
 
 | Script | Executor | Default load | Run |
 |---|---|---|---|
@@ -74,6 +80,27 @@ load-testing/
 
 The full 13-op mix is `DEFAULT_MIX` in `lib/crud.js`. Override it with `K6_ARGS="-e MIX=Get=80,Put=20"`.
 
+### Bulk scripts (02-bulk-streaming)
+
+One bulk call moves `COUNT` entries in chunks of `BATCH`: one gRPC stream, or one native
+putAll/getAll/removeAll per chunk. Each VU works on its own key range, and every iteration
+puts, gets and removes the same keys, so the region stays the same size.
+
+| Script | Load | Run |
+|---|---|---|
+| `bulk/smoke` | 1 VU: each op once in every mode, 1,000 entries | parallel |
+| `bulk/throughput` | 4 VUs · put/get/remove of 10,000 entries in chunks of 500 · 2 m | sequential |
+| `bulk/stream-vs-unary` | the same cycle of 2,000 entries as a stream, 16 unary calls in flight, then 1 at a time · 45 s each | sequential |
+| `bulk/batch-sweep` | the throughput cycle at chunk sizes 10, 100, 500, 1000, 5000 · 30 s each | sequential |
+| `bulk/large-payload` | 64 KiB values (chunks capped at ~1 MiB) · 1 m 30 s | sequential |
+| `bulk/keyset` | 500,000 keys, then the whole key set over and over · 1 m | sequential |
+
+Their table leads with **ENTRIES/S**, and CPU is per 1,000 entries. Scripts with a `Breakdown`
+header add a second table with one row per client and tag value, plus "vs" rows within each
+client (e.g. `grpc-java · unary×1 vs stream: 16× fewer`) and across clients. A Counter's rate in
+k6 is over the whole test, so each slice records how long it ran (`bulk_slice_seconds`), and the
+breakdown's entries/s is entries ÷ that time.
+
 ## What gets measured
 
 | Measure | Source | Meaning |
@@ -81,6 +108,8 @@ The full 13-op mix is `DEFAULT_MIX` in `lib/crud.js`. Override it with `K6_ARGS=
 | `http_req_duration` (E2E) | k6 | the whole HTTP request: what a caller of the service sees |
 | `gemfire_call_duration` (GF) | client's `X-GemFire-Micros` header | the GemFire call alone (gRPC RPC or Region API) |
 | CPU/REQ | cAdvisor through Prometheus | the client container's CPU-µs per request over the run |
+| `bulk_entries` (ENTRIES/S) | client's `X-Entries` header | entries a bulk call moved (GetStream / Get: entries found) |
+| CPU/1k | cAdvisor through Prometheus | bulk scripts: the client container's CPU-µs per 1,000 entries |
 
 k6 pushes its metrics to the example's Prometheus as native histograms (remote write), tagged
 with `client`, `run`, `example`, `script` and `op`. The example's dashboard has a k6 row and a
@@ -97,3 +126,5 @@ Each run gets `results/<yyyymmdd-hhmmss>-<example>-<script>/`, containing:
 - a copy of the script that ran
 
 A run exits non-zero if any client's k6 thresholds failed. The default threshold is under 1% failed requests.
+If a client's k6 run never got to its scenario (for example, setup failed), its row shows dashes
+and the reason, e.g. `FAIL (setup failed: preload failed: 404 ...)`, and its "vs" rows are left out.

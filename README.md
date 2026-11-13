@@ -32,8 +32,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 | 08 | token-auth-rbac | Bearer tokens, `SecurityManager`, per-region `DATA:READ`/`WRITE` | `AuthInitialize` + same `SecurityManager` | :3008 | planned |
 | 09 | secure-xds | xDS + mTLS + tokens | SSL + auth | :3009 | planned |
 | 10 | error-handling | Every gRPC status code, retries, deadlines | Native exceptions | :3010 | planned |
-| 11 | benchmark-showdown | native-java vs grpc-java vs grpc-go, swept across concurrency, payload size and server tuning | full participant | :3011 | planned |
-| 12 | go-client | Idiomatic Go across all features | – | :3012 | planned |
+| 11 | experiments | What drives the gRPC vs native gap: REPLICATE vs PARTITION (forwarding hop vs translation cost), a GemFire REST API baseline, sweeps across concurrency and payload size, server `worker-threads` tuning | full participant | :3011 | planned |
 
 Native-only GemFire features (continuous queries, cache listeners, interest registration,
 function execution) are **not** available over gRPC. Use the Java, C++ or .NET clients for those.
@@ -65,7 +64,8 @@ make select-load-test EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # overrid
 ```
 
 Each run prints end-to-end latency (what k6 saw) next to the time inside the GemFire call
-(reported by the client), CPU per request, and each gRPC client as a ratio of native. It saves everything under
+(reported by the client) and CPU per request, then says in words how each gRPC client compares
+with native, e.g. `grpc-java vs native: 73% slower`. It saves everything under
 `load-testing/results/` and adds an annotation to the example's Grafana dashboard.
 
 ## Conventions used by every example

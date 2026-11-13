@@ -1,6 +1,6 @@
 // Description: Maximum throughput: 64 VUs in a closed loop (no pacing) for 2m, each client alone
 // Examples: all
-// Clients: native-java, grpc-java
+// Clients: native-java, grpc-java, grpc-go
 // Run: sequential
 // Env: VUS=64 DURATION=2m KEY_SPACE=10000 SIZE=1024 MIX=Get=40,Put=15,...
 import { crud, options as base, picker, mixFromEnv, preload, randomKey, KEY_SPACE, SIZE } from '../../lib/crud.js';

@@ -16,7 +16,7 @@ help: ## show this menu
 	@printf '\nVariables (all optional; anything left out is picked with fzf or means "everything"):\n'
 	@printf '  \033[33m%-17s\033[0m %s\n' \
 		EX      "example number, e.g. EX=01" \
-		CLIENT  "load target: all | grpc-java | native-java" \
+		CLIENT  "load target: all | native-java | grpc-java | grpc-go" \
 		SCRIPT  "k6 script under load-testing/scripts, e.g. SCRIPT=crud/steady" \
 		RUN     "load: parallel | sequential   ·   results: latest | <run prefix>" \
 		K6_ARGS "extra k6 args, e.g. K6_ARGS=\"-e RATE=3000 -e DURATION=1m\""

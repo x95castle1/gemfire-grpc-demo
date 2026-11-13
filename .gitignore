@@ -4,6 +4,8 @@ gemfire-extensions/*
 
 # Proto copied in from gemfire-extensions/ at build time
 **/src/main/proto/gemfire/
+# Go stubs generated from it (grpc-client-go/generate.sh)
+**/grpc-client-go/gen/
 
 # Build outputs
 **/build/

@@ -1,6 +1,6 @@
 // Description: Big values: 50/50 Put/Get of 64 KiB values at 200 req/s for 2m (try SIZE=5000000 to hit gRPC's 4 MiB limit)
 // Examples: all
-// Clients: native-java, grpc-java
+// Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: SIZE=65536 RATE=200 DURATION=2m KEY_SPACE=1000
 import { crud, options as base, picker, preload, randomKey } from '../../lib/crud.js';

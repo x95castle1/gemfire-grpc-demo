@@ -22,7 +22,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 
 | # | Example | gRPC features | Native Java counterpart | Grafana | Status |
 |---|---|---|---|---|---|
-| 01 | [crud-basics](01-crud-basics/) | All 13 unary RPCs; string/int32/int64 keys; every scalar `Value` type; direct `dns:///` connection | Region API (`put`, `putIfAbsent`, `replace`, `containsKeyOnServer`, `sizeOnServer`…) | [:3001](http://localhost:3001) | ✅ |
+| 01 | [crud-basics](01-crud-basics/) | All 13 unary RPCs from Java **and Go**; string/int32/int64 keys; every scalar `Value` type; direct `dns:///` connection | Region API (`put`, `putIfAbsent`, `replace`, `containsKeyOnServer`, `sizeOnServer`…) | [:3001](http://localhost:3001) | ✅ |
 | 02 | bulk-streaming | `PutStream`, `GetStream`, `RemoveStream`, `KeySetStream` | `putAll`, `getAll`, `removeAll`, `keySetOnServer` | :3002 | planned |
 | 03 | oql-query | `Query`: parameters, `field_names`, batching, NULL/UNDEFINED | `QueryService` | :3003 | planned |
 | 04 | structured-values | `google.protobuf.Any`, descriptor JAR deploy, OQL into fields; Go writes and Java reads | PDX | :3004 | planned |
@@ -59,23 +59,23 @@ makes it easy to compare features with the workload held constant, for example p
 vs. TLS (06) vs. tokens (08).
 
 ```bash
-make select-load-test EX=01 SCRIPT=crud/steady                         # both clients at once, 1000 req/s each
+make select-load-test EX=01 SCRIPT=crud/steady                         # all clients at once, 1000 req/s each
 make select-load-test EX=01 SCRIPT=crud/ramp                           # each client alone, 100 → 8000 req/s
 make select-load-test EX=01 SCRIPT=crud/steady K6_ARGS="-e RATE=3000"  # override a script's knobs
 ```
 
 Each run prints end-to-end latency (what k6 saw) next to the time inside the GemFire call
-(reported by the client), CPU per request and the gRPC/native ratio. It saves everything under
+(reported by the client), CPU per request, and each gRPC client as a ratio of native. It saves everything under
 `load-testing/results/` and adds an annotation to the example's Grafana dashboard.
 
 ## Conventions used by every example
 
-- **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN` on the host). Each
+- **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN`/`83NN` on the host). Each
   runs a narrated demo with assertions at startup (`POST /demo` re-runs it; 200 means everything
   passed) and serves `/crud/*` for load tests.
 - **The same metric names in every client**: `demo_op_latency_seconds{client,op}` (histogram),
   `demo_errors_total{client,op,code}` and `demo_checks_total{client,result}`.
 - **Colors** follow the client in every dashboard: native-java is blue, grpc-java is orange, and
   grpc-go is aqua.
-- **Ports**: example *NN* uses Grafana `30NN`, Prometheus `90NN`, grpc-java `81NN` and
-  native-java `82NN`, so examples can run side by side.
+- **Ports**: example *NN* uses Grafana `30NN`, Prometheus `90NN`, grpc-java `81NN`,
+  native-java `82NN` and grpc-go `83NN`, so examples can run side by side.

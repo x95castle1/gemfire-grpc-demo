@@ -1,10 +1,11 @@
 # Runs once (gfsh-init service) after the locator and both servers are healthy.
 connect --locator=locator[10334]
 
-# Bench region shared by both clients (each uses its own key prefix).
+# Bench region shared by all three clients (each uses its own key prefix).
 create region --name=crud --type=PARTITION --if-not-exists
 # One demo region per client so demo-mode assertions (e.g. EntryCount) are exact.
 create region --name=demo-grpc --type=PARTITION --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION --if-not-exists
 create region --name=demo-native --type=PARTITION --if-not-exists
 
 # Show that the gRPC extension is loaded on every member.

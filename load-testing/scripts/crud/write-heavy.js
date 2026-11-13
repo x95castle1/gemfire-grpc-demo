@@ -1,6 +1,6 @@
 // Description: Write-dominated traffic: puts, conditional writes and removes at 2000 req/s for 3m
 // Examples: all
-// Clients: native-java, grpc-java
+// Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: RATE=2000 DURATION=3m KEY_SPACE=10000 SIZE=1024
 import { crud, options as base, picker, preload, randomKey, KEY_SPACE, SIZE } from '../../lib/crud.js';

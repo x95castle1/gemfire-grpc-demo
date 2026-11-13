@@ -75,7 +75,7 @@ services:
       server2: { condition: service_healthy }
 
   # -------------------------------------------------------------------------
-  # Clients: the same workload over gRPC and over the native Java client
+  # Clients: the same workload over gRPC (Java and Go) and over the native Java client
   # -------------------------------------------------------------------------
   grpc-client-java:
     <<: *client
@@ -89,6 +89,19 @@ services:
       GRPC_TARGET: dns:///server1:50051
     ports:
       - "${GRPC_CLIENT_PORT}:8080"
+
+  # The same gRPC client in Go: same RPCs, same HTTP API, same demo, different gRPC stack.
+  grpc-client-go:
+    <<: *client
+    build:
+      context: ./grpc-client-go
+      additional_contexts:
+        gemfire-extensions: ${GEMFIRE_EXTENSIONS_DIR}
+    environment:
+      <<: *client-env
+      GRPC_TARGET: dns:///server1:50051
+    ports:
+      - "${GRPC_GO_CLIENT_PORT}:8080"
 
   native-client-java:
     <<: *client

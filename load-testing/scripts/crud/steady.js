@@ -1,6 +1,6 @@
 // Description: Latency at a fixed, realistic rate: 1000 req/s of the full 13-op mix for 5m
 // Examples: all
-// Clients: native-java, grpc-java
+// Clients: native-java, grpc-java, grpc-go
 // Run: parallel
 // Env: RATE=1000 DURATION=5m KEY_SPACE=10000 SIZE=1024 MIX=Get=40,Put=15,...
 import { crud, options as base, picker, mixFromEnv, preload, randomKey, KEY_SPACE, SIZE } from '../../lib/crud.js';

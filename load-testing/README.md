@@ -9,13 +9,37 @@ example. The same `crud/steady.js` run against 01 (plaintext), 06 (TLS), 07 (mTL
 make select-load-test                                          # fzf: example → script (preview) → client
 make select-load-test EX=01 SCRIPT=crud/ramp                   # no prompts
 make select-load-test EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE=3000 -e DURATION=1m"
-make select-load-test EX=01 SCRIPT=crud/steady RUN=sequential  # one client at a time instead of both at once
+make select-load-test EX=01 SCRIPT=crud/steady RUN=sequential  # one client at a time instead of all at once
 make results                                                   # browse past runs (or: make results RUN=latest)
 ```
 
 `make select-load-test` starts the example if it isn't running. It then runs k6 (`grafana/k6:2.3.0`) as a
 throwaway container on the example's Docker network: one k6 process per client, all at once
 (`parallel`) or one after another (`sequential`). At the end it prints a comparison table.
+
+`CLIENT` defaults to every client the example runs and the script supports, which is all three in 01
+(native-java, grpc-java, grpc-go). In a terminal, fzf asks first, with `all` at the top.
+
+### While it runs
+
+- **Sequential** (`crud/ramp`, `crud/saturate`, or a single client): you get k6's own screen for
+  each client in turn. That's the banner, a live progress bar and k6's full end-of-test summary.
+- **Parallel** (everything else): one k6 process per client, all at once, on one live screen.
+  It shows k6's banner and scenario, then for each client a k6-style progress bar, plus live
+  numbers for this run from Prometheus:
+
+  ```
+    native-java  steady    [===========>------------------]  38%  02/100 VUs  0m45.9s/2m0s  1000.00 iters/s
+                 998.4 req/s · E2E p50 0.26 ms · GF p50 0.10 ms · GF p99 0.74 ms · 0 failed
+    grpc-java    steady    [===========>------------------]  38%  03/100 VUs  0m45.9s/2m0s  1000.00 iters/s
+                 996.9 req/s · E2E p50 0.46 ms · GF p50 0.31 ms · GF p99 3.02 ms · 0 failed
+    grpc-go      steady    [===========>------------------]  38%  02/100 VUs  0m45.9s/2m0s  1000.00 iters/s
+                 997.2 req/s · E2E p50 0.38 ms · GF p50 0.26 ms · GF p99 2.41 ms · 0 failed
+  ```
+
+  Each client's full k6 output, including its summary, goes to `results/<run>/<client>.log`.
+
+Without a terminal (CI, scripts), k6 runs quietly and only the comparison table is printed.
 
 ## Layout
 
@@ -32,10 +56,10 @@ load-testing/
 
 ```js
 // Description: Latency at a fixed, realistic rate: 1000 req/s of the full 13-op mix for 5m
-// Examples: all                     ← "all", or a list like "02, 11"
-// Clients: native-java, grpc-java   ← clients the script can target
-// Run: parallel                     ← default run style; RUN= overrides it
-// Env: RATE=1000 DURATION=5m ...    ← knobs, passed with K6_ARGS="-e RATE=3000"
+// Examples: all                              ← "all", or a list like "02, 11"
+// Clients: native-java, grpc-java, grpc-go   ← clients the script can target
+// Run: parallel                              ← default run style; RUN= overrides it
+// Env: RATE=1000 DURATION=5m ...             ← knobs, passed with K6_ARGS="-e RATE=3000"
 ```
 
 | Script | Executor | Default load | Run |

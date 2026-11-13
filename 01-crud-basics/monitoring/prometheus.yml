@@ -3,11 +3,13 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
-  # Both clients expose identical metric names: demo_op_latency_seconds, demo_errors_total, ...
+  # Every client exposes identical metric names: demo_op_latency_seconds, demo_errors_total, ...
   - job_name: clients
     static_configs:
       - targets: ["grpc-client-java:8080"]
         labels: { service: grpc-client-java }
+      - targets: ["grpc-client-go:8080"]
+        labels: { service: grpc-client-go }
       - targets: ["native-client-java:8080"]
         labels: { service: native-client-java }
 

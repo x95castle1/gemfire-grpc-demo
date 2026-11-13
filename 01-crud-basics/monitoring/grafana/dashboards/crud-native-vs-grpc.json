@@ -109,7 +109,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC\nBoth clients are small HTTP services with the same `/crud` API. Load comes from **k6** (`make select-load-test`), and each run shows up as a shaded annotation. **native-java**: `ClientCache` through the locator, PR single-hop. **grpc-java**: plaintext channel straight to `server1:50051`. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call, measured in the client."
+        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC (Java and Go)\nAll three clients are small HTTP services with the same `/crud` API. Load comes from **k6** (`make select-load-test`), and each run shows up as a shaded annotation. **native-java**: `ClientCache` through the locator, PR single-hop. **grpc-java** and **grpc-go**: a plaintext channel each, straight to `server1:50051`. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call, measured in the client."
       },
       "transparent": true
     },
@@ -147,9 +147,31 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (rate(demo_op_latency_seconds_count[1m]))",
-          "legendFormat": "{{client}}",
+          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"native-java\"}[1m]))",
+          "legendFormat": "native-java",
           "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"grpc-java\"}[1m]))",
+          "legendFormat": "grpc-java",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"grpc-go\"}[1m]))",
+          "legendFormat": "grpc-go",
+          "refId": "C",
           "instant": true,
           "range": false
         }
@@ -257,9 +279,31 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{}[1m])))",
-          "legendFormat": "{{client}}",
+          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java",
           "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go",
+          "refId": "C",
           "instant": true,
           "range": false
         }
@@ -367,9 +411,31 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{}[1m])))",
-          "legendFormat": "{{client}}",
+          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java",
           "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go",
+          "refId": "C",
           "instant": true,
           "range": false
         }
@@ -477,9 +543,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (demo_checks_total{result=\"pass\"})",
-          "legendFormat": "{{client}} \u2713",
-          "refId": "A",
+          "expr": "sum(demo_checks_total{client=\"native-java\", result=\"pass\"})",
+          "legendFormat": "native-java \u2713",
+          "refId": "P0",
           "instant": true,
           "range": false
         },
@@ -488,9 +554,53 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (demo_checks_total{result=\"fail\"})",
-          "legendFormat": "{{client}} \u2717",
-          "refId": "B",
+          "expr": "sum(demo_checks_total{client=\"native-java\", result=\"fail\"})",
+          "legendFormat": "native-java \u2717",
+          "refId": "F0",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(demo_checks_total{client=\"grpc-java\", result=\"pass\"})",
+          "legendFormat": "grpc-java \u2713",
+          "refId": "P1",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(demo_checks_total{client=\"grpc-java\", result=\"fail\"})",
+          "legendFormat": "grpc-java \u2717",
+          "refId": "F1",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(demo_checks_total{client=\"grpc-go\", result=\"pass\"})",
+          "legendFormat": "grpc-go \u2713",
+          "refId": "P2",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(demo_checks_total{client=\"grpc-go\", result=\"fail\"})",
+          "legendFormat": "grpc-go \u2717",
+          "refId": "F2",
           "instant": true,
           "range": false
         }
@@ -559,7 +669,11 @@
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
-        "wideLayout": true
+        "wideLayout": true,
+        "text": {
+          "titleSize": 13,
+          "valueSize": 30
+        }
       }
     },
     {
@@ -685,7 +799,7 @@
       "type": "timeseries",
       "id": 9,
       "title": "p50: end-to-end vs. GemFire call",
-      "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead. That overhead is the same code in both clients, so the GemFire call is where they differ.",
+      "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead: the JDK HttpServer in the Java clients, net/http in grpc-go. Compare clients on the GemFire call.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -818,7 +932,7 @@
       "type": "timeseries",
       "id": 10,
       "title": "p99: end-to-end vs. GemFire call",
-      "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead. That overhead is the same code in both clients, so the GemFire call is where they differ.",
+      "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead: the JDK HttpServer in the Java clients, net/http in grpc-go. Compare clients on the GemFire call.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1397,7 +1511,7 @@
       "type": "table",
       "id": 16,
       "title": "Per-operation latency (last 5 minutes)",
-      "description": "gRPC \u00f7 native > 1 means gRPC is slower. Native GetAndPut, Remove and GetAndRemove are two round trips: client put()/remove() don't return the old value. See the README mapping table.",
+      "description": "java = grpc-java, go = grpc-go; ratios are p50 \u00f7 native p50 (> 1 means slower than native). Native GetAndPut, Remove and GetAndRemove are two round trips: client put()/remove() don't return the old value. See the README mapping table.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1438,7 +1552,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[5m])))",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
@@ -1450,7 +1564,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[5m])))",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
@@ -1462,7 +1576,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"native-java\"}[5m]))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[5m])))",
           "legendFormat": "",
           "refId": "E",
           "instant": true,
@@ -1474,9 +1588,45 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"grpc-java\"}[5m]))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[5m])))",
           "legendFormat": "",
           "refId": "F",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"native-java\"}[5m]))",
+          "legendFormat": "",
+          "refId": "G",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"grpc-java\"}[5m]))",
+          "legendFormat": "",
+          "refId": "H",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"grpc-go\"}[5m]))",
+          "legendFormat": "",
+          "refId": "I",
           "instant": true,
           "range": false,
           "format": "table"
@@ -1491,9 +1641,22 @@
           "id": "calculateField",
           "options": {
             "mode": "binary",
-            "alias": "gRPC \u00f7 native (p50)",
+            "alias": "java \u00f7 native",
             "binary": {
               "left": "Value #B",
+              "operator": "/",
+              "right": "Value #A"
+            },
+            "replaceFields": false
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "mode": "binary",
+            "alias": "go \u00f7 native",
+            "binary": {
+              "left": "Value #C",
               "operator": "/",
               "right": "Value #A"
             },
@@ -1510,20 +1673,27 @@
               "op": 0,
               "Value #A": 1,
               "Value #B": 2,
-              "gRPC \u00f7 native (p50)": 3,
-              "Value #C": 4,
-              "Value #D": 5,
-              "Value #E": 6,
-              "Value #F": 7
+              "Value #C": 3,
+              "java \u00f7 native": 4,
+              "go \u00f7 native": 5,
+              "Value #D": 6,
+              "Value #E": 7,
+              "Value #F": 8,
+              "Value #G": 9,
+              "Value #H": 10,
+              "Value #I": 11
             },
             "renameByName": {
               "op": "Operation",
               "Value #A": "native p50",
-              "Value #B": "gRPC p50",
-              "Value #C": "native p99",
-              "Value #D": "gRPC p99",
-              "Value #E": "native ops/s",
-              "Value #F": "gRPC ops/s"
+              "Value #B": "java p50",
+              "Value #C": "go p50",
+              "Value #D": "native p99",
+              "Value #E": "java p99",
+              "Value #F": "go p99",
+              "Value #G": "native ops/s",
+              "Value #H": "java ops/s",
+              "Value #I": "go ops/s"
             }
           }
         },
@@ -1532,7 +1702,7 @@
           "options": {
             "sort": [
               {
-                "field": "gRPC \u00f7 native (p50)",
+                "field": "java \u00f7 native",
                 "desc": true
               }
             ]
@@ -1544,14 +1714,15 @@
           "unit": "s",
           "decimals": 2,
           "custom": {
-            "align": "auto"
+            "align": "auto",
+            "width": 136
           }
         },
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "gRPC \u00f7 native (p50)"
+              "id": "byRegexp",
+              "options": ".*\u00f7 native.*"
             },
             "properties": [
               {
@@ -1589,6 +1760,10 @@
               {
                 "id": "unit",
                 "value": "string"
+              },
+              {
+                "id": "custom.width",
+                "value": 170
               }
             ]
           }
@@ -1950,7 +2125,7 @@
       "type": "timeseries",
       "id": 22,
       "title": "Region gets/s per server (/crud)",
-      "description": "PartitionedRegionStats.getsCompleted, from both clients combined.",
+      "description": "PartitionedRegionStats.getsCompleted, from all clients combined.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2162,7 +2337,7 @@
       "type": "timeseries",
       "id": 24,
       "title": "Puts forwarded to the owning server",
-      "description": "PartitionedRegionStats.putRemoteCompleted: puts that arrived at a server that doesn't own the bucket and had to be forwarded. The gRPC client sends everything to server1, so about half its writes take this extra hop. Native single-hop sends each op straight to the owner.",
+      "description": "PartitionedRegionStats.putRemoteCompleted: puts that arrived at a server that doesn't own the bucket and had to be forwarded. Both gRPC clients send everything to server1, so about half their writes take this extra hop. Native single-hop sends each op straight to the owner.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2268,7 +2443,7 @@
       "type": "timeseries",
       "id": 25,
       "title": "Client connections per server",
-      "description": "native: CacheServerStats.currentClientConnections (pooled sockets). gRPC: GrpcServerStats.grpc.server.connections (one multiplexed HTTP/2 connection). The only statistic the gRPC extension registers.",
+      "description": "native: CacheServerStats.currentClientConnections (pooled sockets). gRPC: GrpcServerStats.grpc.server.connections (one multiplexed HTTP/2 connection per gRPC client). The only statistic the gRPC extension registers.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -2511,7 +2686,7 @@
     },
     {
       "type": "row",
-      "title": "Resource cost (cAdvisor + client JVM)",
+      "title": "Resource cost (cAdvisor)",
       "id": 28,
       "collapsed": false,
       "gridPos": {
@@ -2543,7 +2718,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\".*-client-java\"}[1m]))",
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]))",
           "legendFormat": "{{service}}",
           "refId": "A"
         }
@@ -2596,6 +2771,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
                 }
               }
             ]
@@ -2740,6 +2930,21 @@
           {
             "matcher": {
               "id": "byRegexp",
+              "options": "^grpc-client-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
               "options": "^server1( .*)?$"
             },
             "properties": [
@@ -2817,7 +3022,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~\".*-client-java\"}[1m]), \"client\", \"$1-java\", \"service\", \"(.*)-client-java\")) / sum by (client) (rate(demo_op_latency_seconds_count[1m]))",
+          "expr": "sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]), \"client\", \"$1-$2\", \"service\", \"(.*)-client-(.*)\")) / sum by (client) (rate(demo_op_latency_seconds_count[1m]))",
           "legendFormat": "{{client}}",
           "refId": "A"
         }
@@ -2923,7 +3128,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (service) (container_memory_working_set_bytes{service=~\".*-client-java|locator|server1|server2\"})",
+          "expr": "sum by (service) (container_memory_working_set_bytes{service=~\".*-client-.*|locator|server1|server2\"})",
           "legendFormat": "{{service}}",
           "refId": "A"
         }
@@ -2975,6 +3180,21 @@
                 "value": {
                   "mode": "fixed",
                   "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
                 }
               }
             ]

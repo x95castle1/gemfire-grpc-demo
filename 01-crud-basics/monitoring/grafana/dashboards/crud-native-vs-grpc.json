@@ -12,7 +12,7 @@
   "editable": true,
   "graphTooltip": 1,
   "time": {
-    "from": "now-15m",
+    "from": "now-30m",
     "to": "now"
   },
   "refresh": "10s",
@@ -55,21 +55,22 @@
           "uid": "prometheus"
         },
         "query": {
-          "query": "label_values(demo_op_latency_seconds_count, op)",
+          "query": "label_values(k6_gemfire_call_duration_seconds, op)",
           "refId": "op"
         },
-        "definition": "label_values(demo_op_latency_seconds_count, op)",
+        "definition": "label_values(k6_gemfire_call_duration_seconds, op)",
         "multi": true,
         "includeAll": true,
+        "allValue": ".*",
         "refresh": 2,
         "sort": 1,
         "current": {
           "selected": true,
           "text": [
-            "Get"
+            "All"
           ],
           "value": [
-            "Get"
+            "$__all"
           ]
         }
       }
@@ -109,13 +110,13 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC (Java and Go)\nAll three clients are small HTTP services with the same `/crud` API. Load comes from **k6** (`make select-load-test`), and each run shows up as a shaded annotation. **native-java**: `ClientCache` through the locator, PR single-hop. **grpc-java** and **grpc-go**: a plaintext channel each, straight to `server1:50051`. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call, measured in the client."
+        "content": "### 01 \u00b7 CRUD basics: native Java client vs. GemFire for gRPC (Java and Go)\n**native-java**: `ClientCache` through the locator, single-hop. **grpc-java** / **grpc-go**: a plaintext channel each, straight to `server1:50051`. Load comes from k6 (`make select-load-test`); each run is a shaded band, and the **load run** dropdown picks which runs the panels show. *End-to-end* = the HTTP request as k6 saw it. *GemFire call* = time inside the gRPC RPC / Region API call."
       },
       "transparent": true
     },
     {
       "type": "row",
-      "title": "At a glance (GemFire calls made by each client)",
+      "title": "At a glance: selected load runs over the time range",
       "id": 2,
       "collapsed": false,
       "gridPos": {
@@ -129,8 +130,8 @@
     {
       "type": "stat",
       "id": 3,
-      "title": "Throughput",
-      "description": "Successful GemFire calls per second, per client (driven by k6).",
+      "title": "Peak throughput",
+      "description": "Computed over the whole time range for the runs picked in the \"load run\" dropdown, so the panel keeps its numbers after a run ends. Highest requests/s k6 sustained (30-second windows) against each client.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -147,7 +148,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"native-java\"}[1m]))",
+          "expr": "max_over_time(sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"native-java\"}[30s]))[$__range:10s])",
           "legendFormat": "native-java",
           "refId": "A",
           "instant": true,
@@ -158,7 +159,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"grpc-java\"}[1m]))",
+          "expr": "max_over_time(sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-java\"}[30s]))[$__range:10s])",
           "legendFormat": "grpc-java",
           "refId": "B",
           "instant": true,
@@ -169,7 +170,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(demo_op_latency_seconds_count{client=\"grpc-go\"}[1m]))",
+          "expr": "max_over_time(sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-go\"}[30s]))[$__range:10s])",
           "legendFormat": "grpc-go",
           "refId": "C",
           "instant": true,
@@ -178,7 +179,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "suffix: req/s",
           "color": {
             "mode": "fixed",
             "fixedColor": "text"
@@ -261,8 +262,8 @@
     {
       "type": "stat",
       "id": 4,
-      "title": "p50 latency",
-      "description": "",
+      "title": "GemFire call p50",
+      "description": "Computed over the whole time range for the runs picked in the \"load run\" dropdown, so the panel keeps its numbers after a run ends. Median time inside the GemFire call (gRPC RPC or Region API call), as each client reported it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -279,7 +280,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[1m])))",
+          "expr": "histogram_quantile(0.5, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[$__range])))",
           "legendFormat": "native-java",
           "refId": "A",
           "instant": true,
@@ -290,7 +291,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[1m])))",
+          "expr": "histogram_quantile(0.5, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[$__range])))",
           "legendFormat": "grpc-java",
           "refId": "B",
           "instant": true,
@@ -301,7 +302,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[1m])))",
+          "expr": "histogram_quantile(0.5, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[$__range])))",
           "legendFormat": "grpc-go",
           "refId": "C",
           "instant": true,
@@ -393,8 +394,8 @@
     {
       "type": "stat",
       "id": 5,
-      "title": "p99 latency",
-      "description": "",
+      "title": "GemFire call p99",
+      "description": "Computed over the whole time range for the runs picked in the \"load run\" dropdown, so the panel keeps its numbers after a run ends. 99th percentile of the GemFire call.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -411,7 +412,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[$__range])))",
           "legendFormat": "native-java",
           "refId": "A",
           "instant": true,
@@ -422,7 +423,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[$__range])))",
           "legendFormat": "grpc-java",
           "refId": "B",
           "instant": true,
@@ -433,7 +434,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[1m])))",
+          "expr": "histogram_quantile(0.99, sum(increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[$__range])))",
           "legendFormat": "grpc-go",
           "refId": "C",
           "instant": true,
@@ -526,7 +527,7 @@
       "type": "stat",
       "id": 6,
       "title": "Demo checks",
-      "description": "Assertions from the narrated demo (runs at client startup and on POST /demo): \u2713 passed, \u2717 failed. Any failure turns red.",
+      "description": "Assertions from the narrated demo (runs at client startup and on POST /demo): \u2713 passed, \u2717 failed. Any failure turns red. Not tied to load runs.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -692,8 +693,8 @@
     {
       "type": "timeseries",
       "id": 8,
-      "title": "Requests/s (k6)",
-      "description": "Requests k6 completed per second, per target client. Filter runs with the `run` variable.",
+      "title": "Requests/s",
+      "description": "Requests k6 completed per second against each client.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -710,9 +711,27 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (rate(k6_http_reqs_total{run=~\"$run\"}[30s]))",
-          "legendFormat": "{{client}}",
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"native-java\"}[30s]))",
+          "legendFormat": "native-java",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-java\"}[30s]))",
+          "legendFormat": "grpc-java",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-go\"}[30s]))",
+          "legendFormat": "grpc-go",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -725,7 +744,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -816,8 +835,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (client) (rate(k6_http_req_duration_seconds{run=~\"$run\"}[1m])))",
-          "legendFormat": "{{client}} end-to-end",
+          "expr": "histogram_quantile(0.5, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java end-to-end",
           "refId": "A"
         },
         {
@@ -825,9 +844,45 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (client) (rate(k6_gemfire_call_duration_seconds{run=~\"$run\"}[1m])))",
-          "legendFormat": "{{client}} GemFire call",
+          "expr": "histogram_quantile(0.5, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java end-to-end",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go end-to-end",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java GemFire call",
+          "refId": "A2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java GemFire call",
+          "refId": "B2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go GemFire call",
+          "refId": "C2"
         }
       ],
       "fieldConfig": {
@@ -840,7 +895,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -949,8 +1004,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (client) (rate(k6_http_req_duration_seconds{run=~\"$run\"}[1m])))",
-          "legendFormat": "{{client}} end-to-end",
+          "expr": "histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java end-to-end",
           "refId": "A"
         },
         {
@@ -958,9 +1013,45 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (client) (rate(k6_gemfire_call_duration_seconds{run=~\"$run\"}[1m])))",
-          "legendFormat": "{{client}} GemFire call",
+          "expr": "histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java end-to-end",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_http_req_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go end-to-end",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[1m])))",
+          "legendFormat": "native-java GemFire call",
+          "refId": "A2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[1m])))",
+          "legendFormat": "grpc-java GemFire call",
+          "refId": "B2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[1m])))",
+          "legendFormat": "grpc-go GemFire call",
+          "refId": "C2"
         }
       ],
       "fieldConfig": {
@@ -973,7 +1064,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -1082,8 +1173,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (k6_vus{run=~\"$run\"})",
-          "legendFormat": "{{client}} VUs",
+          "expr": "sum(k6_vus{run=~\"$run\", client=\"native-java\"})",
+          "legendFormat": "native-java VUs",
           "refId": "A"
         },
         {
@@ -1091,9 +1182,45 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client) (rate(k6_http_reqs_total{run=~\"$run\", expected_response=\"false\"}[30s]))",
-          "legendFormat": "{{client}} failed/s",
+          "expr": "sum(k6_vus{run=~\"$run\", client=\"grpc-java\"})",
+          "legendFormat": "grpc-java VUs",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(k6_vus{run=~\"$run\", client=\"grpc-go\"})",
+          "legendFormat": "grpc-go VUs",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"native-java\", expected_response=\"false\"}[30s]))",
+          "legendFormat": "native-java failed/s",
+          "refId": "A2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-java\", expected_response=\"false\"}[30s]))",
+          "legendFormat": "grpc-java failed/s",
+          "refId": "B2"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(k6_http_reqs_total{run=~\"$run\", client=\"grpc-go\", expected_response=\"false\"}[30s]))",
+          "legendFormat": "grpc-go failed/s",
+          "refId": "C2"
         }
       ],
       "fieldConfig": {
@@ -1106,7 +1233,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -1178,7 +1305,7 @@
     },
     {
       "type": "row",
-      "title": "GemFire call latency (in the client): native vs gRPC",
+      "title": "GemFire call latency: native vs gRPC (op: $op)",
       "id": 12,
       "collapsed": false,
       "gridPos": {
@@ -1192,8 +1319,8 @@
     {
       "type": "timeseries",
       "id": 13,
-      "title": "p50 latency (all ops)",
-      "description": "",
+      "title": "GemFire call p50 (op: $op)",
+      "description": "Time inside the GemFire call, per client. Narrow it to some operations with the `op` dropdown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1210,9 +1337,27 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{}[1m])))",
-          "legendFormat": "{{client}}",
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\", op=~\"$op\"}[1m])))",
+          "legendFormat": "native-java",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\", op=~\"$op\"}[1m])))",
+          "legendFormat": "grpc-java",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\", op=~\"$op\"}[1m])))",
+          "legendFormat": "grpc-go",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -1225,7 +1370,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -1298,8 +1443,8 @@
     {
       "type": "timeseries",
       "id": 14,
-      "title": "p99 latency (all ops)",
-      "description": "",
+      "title": "GemFire call p99 (op: $op)",
+      "description": "Time inside the GemFire call, per client. Narrow it to some operations with the `op` dropdown.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1316,9 +1461,27 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{}[1m])))",
-          "legendFormat": "{{client}}",
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\", op=~\"$op\"}[1m])))",
+          "legendFormat": "native-java",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\", op=~\"$op\"}[1m])))",
+          "legendFormat": "grpc-java",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum(rate(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\", op=~\"$op\"}[1m])))",
+          "legendFormat": "grpc-go",
+          "refId": "C"
         }
       ],
       "fieldConfig": {
@@ -1331,7 +1494,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -1404,8 +1567,8 @@
     {
       "type": "timeseries",
       "id": 15,
-      "title": "p50 latency for op: $op",
-      "description": "Pick operations with the `op` variable at the top of the dashboard.",
+      "title": "Errors/s by client and code",
+      "description": "Failed GemFire calls, from the clients' own counters. gRPC: status code. Native: exception class. Flat zero = no errors.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1422,14 +1585,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, client) (rate(demo_op_latency_seconds_bucket{op=~\"$op\"}[1m])))",
-          "legendFormat": "{{client}}",
+          "expr": "sum by (client, code) (rate(demo_errors_total[1m])) or sum by (client) (rate(demo_op_latency_seconds_count[1m])) * 0",
+          "legendFormat": "{{client}} {{code}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "ops",
           "color": {
             "mode": "palette-classic"
           },
@@ -1437,7 +1600,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -1510,7 +1673,7 @@
     {
       "type": "table",
       "id": 16,
-      "title": "Per-operation latency (last 5 minutes)",
+      "title": "Per-operation GemFire call latency (selected runs, whole time range)",
       "description": "java = grpc-java, go = grpc-go. The \"vs native\" columns compare p50s: \"254% slower\" means that gRPC client's median call took 254% longer than native's. Native GetAndPut, Remove and GetAndRemove are two round trips: client put()/remove() don't return the old value. See the README mapping table.",
       "datasource": {
         "type": "prometheus",
@@ -1528,7 +1691,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[$__range])))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -1540,7 +1703,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[$__range])))",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
@@ -1552,7 +1715,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[$__range])))",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
@@ -1564,7 +1727,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"native-java\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"native-java\"}[$__range])))",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
@@ -1576,7 +1739,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-java\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-java\"}[$__range])))",
           "legendFormat": "",
           "refId": "E",
           "instant": true,
@@ -1588,45 +1751,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(demo_op_latency_seconds_bucket{client=\"grpc-go\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (op) (increase(k6_gemfire_call_duration_seconds{run=~\"$run\", client=\"grpc-go\"}[$__range])))",
           "legendFormat": "",
           "refId": "F",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"native-java\"}[5m]))",
-          "legendFormat": "",
-          "refId": "G",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"grpc-java\"}[5m]))",
-          "legendFormat": "",
-          "refId": "H",
-          "instant": true,
-          "range": false,
-          "format": "table"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (op) (rate(demo_op_latency_seconds_count{client=\"grpc-go\"}[5m]))",
-          "legendFormat": "",
-          "refId": "I",
           "instant": true,
           "range": false,
           "format": "table"
@@ -1678,22 +1805,16 @@
               "grpc-go vs native": 5,
               "Value #D": 6,
               "Value #E": 7,
-              "Value #F": 8,
-              "Value #G": 9,
-              "Value #H": 10,
-              "Value #I": 11
+              "Value #F": 8
             },
             "renameByName": {
               "op": "Operation",
               "Value #A": "native p50",
-              "Value #B": "java p50",
-              "Value #C": "go p50",
+              "Value #B": "grpc-java p50",
+              "Value #C": "grpc-go p50",
               "Value #D": "native p99",
-              "Value #E": "java p99",
-              "Value #F": "go p99",
-              "Value #G": "native ops/s",
-              "Value #H": "java ops/s",
-              "Value #I": "go ops/s"
+              "Value #E": "grpc-java p99",
+              "Value #F": "grpc-go p99"
             }
           }
         },
@@ -1714,8 +1835,7 @@
           "unit": "s",
           "decimals": 2,
           "custom": {
-            "align": "auto",
-            "width": 128
+            "align": "auto"
           },
           "mappings": [
             {
@@ -1740,10 +1860,6 @@
               {
                 "id": "unit",
                 "value": "none"
-              },
-              {
-                "id": "custom.width",
-                "value": 165
               },
               {
                 "id": "mappings",
@@ -10031,22 +10147,6 @@
           },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".*ops/s"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "ops"
-              },
-              {
-                "id": "decimals",
-                "value": 0
-              }
-            ]
-          },
-          {
-            "matcher": {
               "id": "byName",
               "options": "Operation"
             },
@@ -10054,10 +10154,6 @@
               {
                 "id": "unit",
                 "value": "string"
-              },
-              {
-                "id": "custom.width",
-                "value": 170
               }
             ]
           }
@@ -10073,7 +10169,7 @@
     },
     {
       "type": "row",
-      "title": "Throughput, tail latency & errors",
+      "title": "GemFire servers: what the cluster sees",
       "id": 17,
       "collapsed": false,
       "gridPos": {
@@ -10087,337 +10183,6 @@
     {
       "type": "timeseries",
       "id": 18,
-      "title": "Ops/s by client",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 42
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (client) (rate(demo_op_latency_seconds_count[1m]))",
-          "legendFormat": "{{client}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^native-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#3987e5"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d95926"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-go( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#199e70"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 19,
-      "title": "p99 latency for op: $op",
-      "description": "Pick operations with the `op` variable at the top of the dashboard.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 42
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le, client) (rate(demo_op_latency_seconds_bucket{op=~\"$op\"}[1m])))",
-          "legendFormat": "{{client}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^native-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#3987e5"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d95926"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-go( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#199e70"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 20,
-      "title": "Errors/s by client and code",
-      "description": "gRPC: status code. Native: exception class. Flat zero = no errors.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 42
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (client, code) (rate(demo_errors_total[1m])) or sum by (client) (rate(demo_op_latency_seconds_count[1m])) * 0",
-          "legendFormat": "{{client}} {{code}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^native-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#3987e5"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d95926"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-go( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#199e70"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "row",
-      "title": "GemFire servers: what the cluster sees",
-      "id": 21,
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 50
-      },
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "id": 22,
       "title": "Region gets/s per server (/crud)",
       "description": "PartitionedRegionStats.getsCompleted, from all clients combined.",
       "datasource": {
@@ -10428,7 +10193,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 51
+        "y": 42
       },
       "targets": [
         {
@@ -10451,7 +10216,395 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server1( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server2( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^locator( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#9085e9"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 19,
+      "title": "Region puts/s per server (/crud)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (node) (rate(gemfire_putsCompleted{exported_instance=\"/crud\"}[1m]))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server1( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server2( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^locator( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#9085e9"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "title": "Puts forwarded to the owning server",
+      "description": "PartitionedRegionStats.putRemoteCompleted: puts that arrived at a server that doesn't own the bucket and had to be forwarded. Both gRPC clients send everything to server1, so about half their writes take this extra hop. Native single-hop sends each op straight to the owner.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (node) (rate(gemfire_putRemoteCompleted{exported_instance=\"/crud\"}[1m]))",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server1( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server2( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^locator( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#9085e9"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 21,
+      "title": "Client connections per server",
+      "description": "native: CacheServerStats.currentClientConnections (pooled sockets). gRPC: GrpcServerStats.grpc.server.connections (one multiplexed HTTP/2 connection per gRPC client). The only statistic the gRPC extension registers.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 42
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (node) (gemfire_currentClientConnections)",
+          "legendFormat": "native {{node}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (node) (gemfire_grpc_server_connections)",
+          "legendFormat": "gRPC {{node}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 22,
+      "title": "Heap used per member",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 50
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (node) (gemfire_usedMemory{exported_instance=\"vmHeapMemoryStats\"})",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -10524,123 +10677,17 @@
     {
       "type": "timeseries",
       "id": 23,
-      "title": "Region puts/s per server (/crud)",
-      "description": "",
+      "title": "Cache-server (native protocol) requests/s",
+      "description": "CacheServerStats counts only native-protocol traffic on port 40404. gRPC requests don't pass through the cache server, so they don't show up here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 51
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (node) (rate(gemfire_putsCompleted{exported_instance=\"/crud\"}[1m]))",
-          "legendFormat": "{{node}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server1( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#c98500"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server2( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d55181"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^locator( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#9085e9"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 24,
-      "title": "Puts forwarded to the owning server",
-      "description": "PartitionedRegionStats.putRemoteCompleted: puts that arrived at a server that doesn't own the bucket and had to be forwarded. Both gRPC clients send everything to server1, so about half their writes take this extra hop. Native single-hop sends each op straight to the owner.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
+        "w": 12,
         "x": 12,
-        "y": 51
+        "y": 50
       },
       "targets": [
         {
@@ -10648,114 +10695,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (rate(gemfire_putRemoteCompleted{exported_instance=\"/crud\"}[1m]))",
-          "legendFormat": "{{node}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server1( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#c98500"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server2( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d55181"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^locator( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#9085e9"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 25,
-      "title": "Client connections per server",
-      "description": "native: CacheServerStats.currentClientConnections (pooled sockets). gRPC: GrpcServerStats.grpc.server.connections (one multiplexed HTTP/2 connection per gRPC client). The only statistic the gRPC extension registers.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 51
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (node) (gemfire_currentClientConnections)",
-          "legendFormat": "native {{node}}",
+          "expr": "sum by (node) (rate(gemfire_getRequests[1m]))",
+          "legendFormat": "get {{node}}",
           "refId": "A"
         },
         {
@@ -10763,14 +10704,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (gemfire_grpc_server_connections)",
-          "legendFormat": "gRPC {{node}}",
+          "expr": "sum by (node) (rate(gemfire_putRequests[1m]))",
+          "legendFormat": "put {{node}}",
           "refId": "B"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "color": {
             "mode": "palette-classic"
           },
@@ -10778,7 +10719,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -10786,8 +10727,7 @@
             },
             "gradientMode": "none",
             "axisBorderShow": false
-          },
-          "decimals": 0
+          }
         },
         "overrides": []
       },
@@ -10804,9 +10744,22 @@
       }
     },
     {
+      "type": "row",
+      "title": "Resource cost (cAdvisor)",
+      "id": 24,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "panels": []
+    },
+    {
       "type": "timeseries",
-      "id": 26,
-      "title": "Heap used per member",
+      "id": 25,
+      "title": "CPU: clients (cores)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -10814,7 +10767,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 0,
         "y": 59
       },
@@ -10824,14 +10777,14 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (gemfire_usedMemory{exported_instance=\"vmHeapMemoryStats\"})",
-          "legendFormat": "{{node}}",
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]))",
+          "legendFormat": "{{service}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "short",
           "color": {
             "mode": "palette-classic"
           },
@@ -10839,7 +10792,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -10847,9 +10800,207 @@
             },
             "gradientMode": "none",
             "axisBorderShow": false
-          }
+          },
+          "decimals": 2
         },
         "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^native-client-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server1( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#c98500"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^server2( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d55181"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^locator( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#9085e9"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 26,
+      "title": "CPU: GemFire members (cores)",
+      "description": "server1 is the gRPC entry point. It also decodes protobuf and forwards requests for buckets it doesn't own.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 59
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"locator|server1|server2\"}[1m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^native-client-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-client-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          },
           {
             "matcher": {
               "id": "byRegexp",
@@ -10912,15 +11063,15 @@
     {
       "type": "timeseries",
       "id": 27,
-      "title": "Cache-server (native protocol) requests/s",
-      "description": "CacheServerStats counts only native-protocol traffic on port 40404. gRPC requests don't pass through the cache server, so they don't show up here.",
+      "title": "Client CPU per request",
+      "description": "Client container CPU-seconds per request k6 completed (selected runs). Lower is cheaper. Empty between runs.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 12,
         "y": 59
       },
@@ -10930,393 +11081,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (node) (rate(gemfire_getRequests[1m]))",
-          "legendFormat": "get {{node}}",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (node) (rate(gemfire_putRequests[1m]))",
-          "legendFormat": "put {{node}}",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "row",
-      "title": "Resource cost (cAdvisor)",
-      "id": 28,
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 67
-      },
-      "panels": []
-    },
-    {
-      "type": "timeseries",
-      "id": 29,
-      "title": "CPU: clients (cores)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 68
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]))",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          },
-          "decimals": 2
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^native-client-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#3987e5"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-client-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d95926"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-client-go( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#199e70"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server1( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#c98500"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server2( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d55181"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^locator( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#9085e9"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 30,
-      "title": "CPU: GemFire members (cores)",
-      "description": "server1 is the gRPC entry point. It also decodes protobuf and forwards requests for buckets it doesn't own.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 68
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service=~\"locator|server1|server2\"}[1m]))",
-          "legendFormat": "{{service}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 2,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "spanNulls": true,
-            "axisSoftMin": 0,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "gradientMode": "none",
-            "axisBorderShow": false
-          },
-          "decimals": 2
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^native-client-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#3987e5"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-client-java( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d95926"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^grpc-client-go( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#199e70"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server1( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#c98500"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^server2( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#d55181"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "^locator( .*)?$"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "#9085e9"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "id": 31,
-      "title": "Client CPU per operation",
-      "description": "Client container CPU-seconds \u00f7 ops completed. Lower is cheaper.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 68
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]), \"client\", \"$1-$2\", \"service\", \"(.*)-client-(.*)\")) / sum by (client) (rate(demo_op_latency_seconds_count[1m]))",
+          "expr": "sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~\".*-client-.*\"}[1m]), \"client\", \"$1-$2\", \"service\", \"(.*)-client-(.*)\")) / sum by (client) (rate(k6_http_reqs_total{run=~\"$run\"}[1m]))",
           "legendFormat": "{{client}}",
           "refId": "A"
         }
@@ -11331,7 +11096,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",
@@ -11403,7 +11168,7 @@
     },
     {
       "type": "timeseries",
-      "id": 32,
+      "id": 28,
       "title": "Memory working set",
       "description": "",
       "datasource": {
@@ -11414,7 +11179,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 68
+        "y": 59
       },
       "targets": [
         {
@@ -11437,7 +11202,7 @@
             "lineWidth": 2,
             "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": 60000,
             "axisSoftMin": 0,
             "stacking": {
               "mode": "none",

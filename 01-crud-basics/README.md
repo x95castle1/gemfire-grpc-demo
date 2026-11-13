@@ -172,7 +172,10 @@ covered in `10-error-handling`.
 ## What to look for in Grafana
 
 Open **"01 · CRUD basics: native vs gRPC"** at [localhost:3001](http://localhost:3001). Each
-`make select-load-test` run appears as a shaded band; use the **load run** dropdown to focus on one run.
+`make select-load-test` run appears as a shaded band. Every latency and throughput panel reads
+k6's metrics, so the **load run** dropdown filters all of them. The "At a glance" stats and the
+per-operation table cover the whole time range, so they keep their numbers after a run ends. Pick
+a single run to get the same numbers as the terminal table.
 
 - **Load test (k6) row.** For each client, a solid line (end-to-end) and a dashed line (GemFire
   call). The clients' solid lines sit closer together than their dashed lines, because HTTP

@@ -141,6 +141,14 @@ E2E = "k6_http_req_duration_seconds"      # the whole HTTP request as k6 saw it
 REQS = "k6_http_reqs_total"
 
 
+CPU_BY_CLIENT = ('sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~".*-client-.*"}[1m]),'
+                 ' "client", "$1-$2", "service", "(.*)-client-(.*)"))')
+
+
+def by_client_range(pct, metric):
+    return f'histogram_quantile({pct}, sum by (client) (increase({metric}{{{RUN}}}[$__range])))'
+
+
 def per_client(expr_for, legend="{c}"):
     """One query per client, so legends and stats always read native-java, grpc-java, grpc-go."""
     return [target(expr_for(c), legend.format(c=c), chr(65 + i)) for i, c in enumerate(ORDER)]
@@ -160,25 +168,70 @@ panels.append(row("At a glance: selected load runs over the time range", y)); y 
 glance = ("Computed over the whole time range for the runs picked in the \"load run\" dropdown, "
           "so the panel keeps its numbers after a run ends. ")
 panels.append(stat("Peak throughput", per_client(lambda c: f'max_over_time(sum(rate({REQS}{{{RUN}, client="{c}"}}[30s]))[$__range:10s])'),
-                   0, y, 6, 4, unit="suffix: req/s", colors=CLIENT_COLORS, decimals=0,
+                   0, y, 8, 4, unit="suffix: req/s", colors=CLIENT_COLORS, decimals=0,
                    desc=glance + "Highest requests/s k6 sustained (30-second windows) against each client."))
-panels.append(stat("GemFire call p50", per_client(lambda c: over_range(0.5, GF, c)), 6, y, 6, 4, unit="s",
+panels.append(stat("GemFire call p50", per_client(lambda c: over_range(0.5, GF, c)), 8, y, 8, 4, unit="s",
                    colors=CLIENT_COLORS, decimals=2,
                    desc=glance + "Median time inside the GemFire call (gRPC RPC or Region API call), as each client reported it."))
-panels.append(stat("GemFire call p99", per_client(lambda c: over_range(0.99, GF, c)), 12, y, 6, 4, unit="s",
+panels.append(stat("GemFire call p99", per_client(lambda c: over_range(0.99, GF, c)), 16, y, 8, 4, unit="s",
                    colors=CLIENT_COLORS, decimals=2, desc=glance + "99th percentile of the GemFire call."))
-panels.append(stat(
-    "Demo checks",
-    [target(f'sum(demo_checks_total{{client="{c}", result="{r}"}})', f"{c} {m}", f"{m2}{i}")
-     for i, c in enumerate(ORDER) for r, m, m2 in (("pass", "✓", "P"), ("fail", "✗", "F"))],
-    18, y, 6, 4, decimals=0,
-    desc="Assertions from the narrated demo (runs at client startup and on POST /demo): ✓ passed, ✗ failed. Any failure turns red. Not tied to load runs.",
-    orientation="vertical", text={"titleSize": 13, "valueSize": 30},
-    overrides=[{"matcher": {"id": "byRegexp", "options": ".*✗"},
-                "properties": [{"id": "thresholds", "value": {"mode": "absolute", "steps": [
-                    {"color": "green", "value": None}, {"color": "red", "value": 1}]}},
-                    {"id": "color", "value": {"mode": "thresholds"}}]}]))
 y += 4
+
+# --- Run summary table (same columns as the terminal table) --------------------------------------
+panels.append(row("Run summary: same columns as the terminal table", y)); y += 1
+order_q = " or ".join(f'label_replace(vector({i}), "client", "{c}", "", "")' for i, c in enumerate(ORDER))
+reqs_total = f"sum by (client) (increase({REQS}{{{RUN}}}[$__range]))"
+failed_total = f'sum by (client) (increase({REQS}{{{RUN}, expected_response="false"}}[$__range]))'
+# CPU-seconds only while the client was under load, so idle time between runs doesn't count.
+cpu_active = (f"sum by (client) (sum_over_time(({CPU_BY_CLIENT} and on (client) "
+              f"(sum by (client) (rate({REQS}{{{RUN}}}[1m])) > 0))[$__range:15s])) * 15")
+summary_targets = [
+    target(order_q, "", "ORDER", True, "table"),
+    target(reqs_total, "", "REQS", True, "table"),
+    target(f"max_over_time(sum by (client) (rate({REQS}{{{RUN}}}[30s]))[$__range:10s])", "", "PEAK", True, "table"),
+    target(f"({failed_total} or {reqs_total} * 0) / {reqs_total}", "", "FAILED", True, "table"),
+    target(by_client_range(0.5, E2E), "", "E2E50", True, "table"),
+    target(by_client_range(0.95, E2E), "", "E2E95", True, "table"),
+    target(by_client_range(0.99, E2E), "", "E2E99", True, "table"),
+    target(by_client_range(0.5, GF), "", "GF50", True, "table"),
+    target(by_client_range(0.99, GF), "", "GF99", True, "table"),
+    target(f"{cpu_active} / {reqs_total}", "", "CPU", True, "table"),
+]
+names = {"Value #REQS": "requests", "Value #PEAK": "peak req/s", "Value #FAILED": "failed",
+         "Value #E2E50": "E2E p50", "Value #E2E95": "E2E p95", "Value #E2E99": "E2E p99",
+         "Value #GF50": "GemFire p50", "Value #GF99": "GemFire p99", "Value #CPU": "CPU per request"}
+panels.append({
+    "type": "table", "id": nid(), "title": "", "datasource": DS,
+    "description": "One row per client, for the selected runs over the time range. CPU per request counts the client container's CPU only while it was under load.",
+    "gridPos": {"h": 5, "w": 24, "x": 0, "y": y}, "targets": summary_targets,
+    "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "sortBy", "options": {"sort": [{"field": "Value #ORDER"}]}},
+        {"id": "organize", "options": {
+            "excludeByName": {"Time": True, "Value #ORDER": True},
+            "indexByName": {"client": 0, **{k: i + 1 for i, k in enumerate(names)}},
+            "renameByName": {"client": "client", **names}}},
+    ],
+    "fieldConfig": {
+        "defaults": {"unit": "s", "decimals": 2, "custom": {"align": "auto"}, "mappings": [NO_DATA]},
+        "overrides": [
+            {"matcher": {"id": "byName", "options": "client"},
+             "properties": [{"id": "unit", "value": "string"},
+                            {"id": "custom.cellOptions", "value": {"type": "color-text"}},
+                            {"id": "mappings", "value": [{"type": "value", "options": {
+                                c: {"color": col, "index": i} for i, (c, col) in enumerate(CLIENT_COLORS.items())}}]}]},
+            {"matcher": {"id": "byName", "options": "requests"},
+             "properties": [{"id": "unit", "value": "none"}, {"id": "decimals", "value": 0}]},
+            {"matcher": {"id": "byName", "options": "peak req/s"},
+             "properties": [{"id": "unit", "value": "suffix: req/s"}, {"id": "decimals", "value": 0}]},
+            {"matcher": {"id": "byName", "options": "failed"},
+             "properties": [{"id": "unit", "value": "percentunit"}, {"id": "decimals", "value": 1}]},
+            {"matcher": {"id": "byName", "options": "CPU per request"},
+             "properties": [{"id": "unit", "value": "s"}, {"id": "decimals", "value": 2}]},
+        ]},
+    "options": {"showHeader": True, "cellHeight": "sm", "footer": {"show": False}},
+})
+y += 5
 
 # --- k6 ----------------------------------------------------------------------------------------
 panels.append(row("Load test (k6): end-to-end vs. GemFire call", y)); y += 1

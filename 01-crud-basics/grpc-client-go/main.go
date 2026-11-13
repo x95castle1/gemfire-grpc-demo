@@ -19,9 +19,22 @@ func main() {
 	cfg := configFromEnv()
 	fmt.Printf("[%s] target=%s region=%s\n", cfg.Client, cfg.GRPCTarget, cfg.Region)
 
+	metrics := newMetrics(cfg)
+	var methods []string
+	for _, m := range pb.GemFire_ServiceDesc.Methods {
+		methods = append(methods, m.MethodName)
+	}
+	for _, s := range pb.GemFire_ServiceDesc.Streams {
+		methods = append(methods, s.StreamName)
+	}
+	metrics.initRPCs(methods, cfg.Region, cfg.DemoRegion)
 	// One channel (ClientConn) for the whole process, as in grpc-java: it multiplexes every
-	// concurrent RPC over HTTP/2. Plaintext here; TLS is covered in 06-tls.
-	conn, err := grpc.NewClient(cfg.GRPCTarget, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// concurrent RPC over HTTP/2. Plaintext here; TLS is covered in 06-tls. Every RPC on it is
+	// timed by the interceptors (demo_rpc_duration_seconds).
+	conn, err := grpc.NewClient(cfg.GRPCTarget,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(metrics.unaryInterceptor),
+		grpc.WithChainStreamInterceptor(metrics.streamInterceptor))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[%s] bad GRPC_TARGET: %v\n", cfg.Client, err)
 		os.Exit(1)
@@ -29,7 +42,6 @@ func main() {
 	defer conn.Close()
 	gemfire := pb.NewGemFireClient(conn)
 
-	metrics := newMetrics(cfg)
 	api := newApi(cfg, metrics, newGrpcCrud(gemfire, cfg), func() Report {
 		checks := newChecks(cfg.Client, metrics)
 		runDemo(gemfire, cfg, checks)

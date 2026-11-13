@@ -73,6 +73,35 @@
             "$__all"
           ]
         }
+      },
+      {
+        "name": "region",
+        "label": "region",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "description": "Filters the panels that read the clients' own metrics (failed calls, the gRPC calls row). k6 doesn't know regions.",
+        "query": {
+          "query": "label_values({__name__=~\"demo_op_latency_seconds_count|demo_rpc_duration_seconds_count\"}, region)",
+          "refId": "region"
+        },
+        "definition": "label_values({__name__=~\"demo_op_latency_seconds_count|demo_rpc_duration_seconds_count\"}, region)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 2,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
       }
     ]
   },
@@ -138,7 +167,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 4
       },
@@ -270,8 +299,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 4
       },
       "targets": [
@@ -402,8 +431,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 4
       },
       "targets": [
@@ -524,9 +553,153 @@
       }
     },
     {
+      "type": "stat",
+      "id": 6,
+      "title": "Failed calls",
+      "description": "Share of /crud operations whose GemFire call failed, over the time range, from the clients' own demo_op_latency_seconds{code!=\"OK\"}. It counts every caller (k6 and curl alike), so it ignores the load run dropdown; the region dropdown applies.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(increase(demo_op_latency_seconds_count{client=\"native-java\", region=~\"$region\", code=~\".+\", code!=\"OK\"}[$__range])) or vector(0)) / sum(increase(demo_op_latency_seconds_count{client=\"native-java\", region=~\"$region\"}[$__range]))",
+          "legendFormat": "native-java",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(increase(demo_op_latency_seconds_count{client=\"grpc-java\", region=~\"$region\", code=~\".+\", code!=\"OK\"}[$__range])) or vector(0)) / sum(increase(demo_op_latency_seconds_count{client=\"grpc-java\", region=~\"$region\"}[$__range]))",
+          "legendFormat": "grpc-java",
+          "refId": "B",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(increase(demo_op_latency_seconds_count{client=\"grpc-go\", region=~\"$region\", code=~\".+\", code!=\"OK\"}[$__range])) or vector(0)) / sum(increase(demo_op_latency_seconds_count{client=\"grpc-go\", region=~\"$region\"}[$__range]))",
+          "legendFormat": "grpc-go",
+          "refId": "C",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2,
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "\u2013",
+                  "color": "text"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^native-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
       "type": "row",
       "title": "Run summary: same columns as the terminal table",
-      "id": 6,
+      "id": 7,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -538,7 +711,7 @@
     },
     {
       "type": "table",
-      "id": 7,
+      "id": 8,
       "title": "",
       "datasource": {
         "type": "prometheus",
@@ -860,7 +1033,7 @@
     {
       "type": "row",
       "title": "Load test (k6): end-to-end vs. GemFire call",
-      "id": 8,
+      "id": 9,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -872,7 +1045,7 @@
     },
     {
       "type": "timeseries",
-      "id": 9,
+      "id": 10,
       "title": "Requests/s",
       "description": "Requests k6 completed per second against each client.",
       "datasource": {
@@ -996,7 +1169,7 @@
     },
     {
       "type": "timeseries",
-      "id": 10,
+      "id": 11,
       "title": "p50: end-to-end vs. GemFire call",
       "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead: the JDK HttpServer in the Java clients, net/http in grpc-go. Compare clients on the GemFire call.",
       "datasource": {
@@ -1165,7 +1338,7 @@
     },
     {
       "type": "timeseries",
-      "id": 11,
+      "id": 12,
       "title": "p99: end-to-end vs. GemFire call",
       "description": "Solid = end-to-end (k6), dashed = GemFire call (in the client). The gap between a client's two lines is HTTP + app overhead: the JDK HttpServer in the Java clients, net/http in grpc-go. Compare clients on the GemFire call.",
       "datasource": {
@@ -1334,7 +1507,7 @@
     },
     {
       "type": "timeseries",
-      "id": 12,
+      "id": 13,
       "title": "k6 VUs and failed requests/s",
       "description": "VUs climb when a client can't keep up with an arrival-rate script.",
       "datasource": {
@@ -1486,7 +1659,7 @@
     {
       "type": "row",
       "title": "GemFire call latency: native vs gRPC (op: $op)",
-      "id": 13,
+      "id": 14,
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1498,7 +1671,7 @@
     },
     {
       "type": "timeseries",
-      "id": 14,
+      "id": 15,
       "title": "GemFire call p50 (op: $op)",
       "description": "Time inside the GemFire call, per client. Narrow it to some operations with the `op` dropdown.",
       "datasource": {
@@ -1507,7 +1680,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 24
       },
@@ -1622,7 +1795,7 @@
     },
     {
       "type": "timeseries",
-      "id": 15,
+      "id": 16,
       "title": "GemFire call p99 (op: $op)",
       "description": "Time inside the GemFire call, per client. Narrow it to some operations with the `op` dropdown.",
       "datasource": {
@@ -1631,8 +1804,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 6,
+        "x": 6,
         "y": 24
       },
       "targets": [
@@ -1746,17 +1919,17 @@
     },
     {
       "type": "timeseries",
-      "id": 16,
-      "title": "Errors/s by client and code",
-      "description": "Failed GemFire calls, from the clients' own counters. gRPC: status code. Native: exception class. Flat zero = no errors.",
+      "id": 17,
+      "title": "Failed calls/s by client and code",
+      "description": "/crud operations whose GemFire call failed, from the clients' own demo_op_latency_seconds{code!=\"OK\"}. gRPC: status code. Native: exception class. Flat zero = no failures.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 12,
         "y": 24
       },
       "targets": [
@@ -1765,7 +1938,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (client, code) (rate(demo_errors_total[1m])) or sum by (client) (rate(demo_op_latency_seconds_count[1m])) * 0",
+          "expr": "sum by (client, code) (rate(demo_op_latency_seconds_count{region=~\"$region\", code=~\".+\", code!=\"OK\"}[1m])) or sum by (client) (rate(demo_op_latency_seconds_count{region=~\"$region\"}[1m])) * 0",
           "legendFormat": "{{client}} {{code}}",
           "refId": "A"
         }
@@ -1851,8 +2024,114 @@
       }
     },
     {
+      "type": "timeseries",
+      "id": 18,
+      "title": "Latency of failed calls (p99)",
+      "description": "How long failed calls took before they failed. A timeout (DEADLINE_EXCEEDED) is a slow failure; most other errors fail fast. Empty while nothing fails.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 24
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, client, code) (rate(demo_op_latency_seconds_bucket{region=~\"$region\", code=~\".+\", code!=\"OK\"}[1m])))",
+          "legendFormat": "{{client}} {{code}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": 60000,
+            "axisSoftMin": 0,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "gradientMode": "none",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^native-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-java( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d95926"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^grpc-go( .*)?$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#199e70"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
       "type": "table",
-      "id": 17,
+      "id": 19,
       "title": "Per-operation GemFire call latency (selected runs, whole time range)",
       "description": "java = grpc-java, go = grpc-go. The \"vs native\" columns compare p50s: \"254% slower\" means that gRPC client's median call took 254% longer than native's. Native GetAndPut, Remove and GetAndRemove are two round trips: client put()/remove() don't return the old value. See the README mapping table.",
       "datasource": {
@@ -10349,20 +10628,589 @@
     },
     {
       "type": "row",
-      "title": "GemFire servers: what the cluster sees",
-      "id": 18,
-      "collapsed": false,
+      "title": "gRPC calls (interceptor): every RPC, streams included",
+      "id": 20,
+      "collapsed": true,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 47
       },
+      "panels": [
+        {
+          "type": "timeseries",
+          "id": 21,
+          "title": "RPCs/s",
+          "description": "gRPC calls per second per client, from demo_rpc_duration_seconds (an interceptor on each channel).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 48
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(demo_rpc_duration_seconds_count{client=\"grpc-java\", region=~\"$region\"}[1m]))",
+              "legendFormat": "grpc-java",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum(rate(demo_rpc_duration_seconds_count{client=\"grpc-go\", region=~\"$region\"}[1m]))",
+              "legendFormat": "grpc-go",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": 60000,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "axisBorderShow": false
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^native-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3987e5"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#d95926"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-go( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#199e70"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "id": 22,
+          "title": "RPC p99",
+          "description": "99th percentile of a gRPC call, start to close. For a stream that's the whole stream.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 48
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(demo_rpc_duration_seconds_bucket{client=\"grpc-java\", region=~\"$region\"}[1m])))",
+              "legendFormat": "grpc-java",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(demo_rpc_duration_seconds_bucket{client=\"grpc-go\", region=~\"$region\"}[1m])))",
+              "legendFormat": "grpc-go",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": 60000,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "axisBorderShow": false
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^native-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3987e5"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#d95926"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-go( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#199e70"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "timeseries",
+          "id": 23,
+          "title": "RPCs/s by status code",
+          "description": "Every gRPC call by its final status code, OK included.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 48
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (client, code) (rate(demo_rpc_duration_seconds_count{region=~\"$region\"}[1m]))",
+              "legendFormat": "{{client}} {{code}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 2,
+                "fillOpacity": 0,
+                "showPoints": "never",
+                "spanNulls": 60000,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "axisBorderShow": false
+              }
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^native-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#3987e5"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-java( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#d95926"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": "^grpc-go( .*)?$"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "mode": "fixed",
+                      "fixedColor": "#199e70"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "type": "table",
+          "id": 24,
+          "title": "gRPC calls by method (whole time range)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "Every gRPC method each client called, from its interceptor: count, latency and failures. PutStream is the preload; the demo's calls count too.",
+          "gridPos": {
+            "h": 15,
+            "w": 24,
+            "x": 0,
+            "y": 56
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-java\", region=~\"$region\"}[$__range]))",
+              "legendFormat": "",
+              "refId": "N0",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, method) (increase(demo_rpc_duration_seconds_bucket{client=\"grpc-java\", region=~\"$region\"}[$__range])))",
+              "legendFormat": "",
+              "refId": "P0",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, method) (increase(demo_rpc_duration_seconds_bucket{client=\"grpc-java\", region=~\"$region\"}[$__range])))",
+              "legendFormat": "",
+              "refId": "Q0",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-java\", region=~\"$region\", code=~\".+\", code!=\"OK\"}[$__range])) or sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-java\", region=~\"$region\"}[$__range])) * 0",
+              "legendFormat": "",
+              "refId": "F0",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-go\", region=~\"$region\"}[$__range]))",
+              "legendFormat": "",
+              "refId": "N1",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.5, sum by (le, method) (increase(demo_rpc_duration_seconds_bucket{client=\"grpc-go\", region=~\"$region\"}[$__range])))",
+              "legendFormat": "",
+              "refId": "P1",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "histogram_quantile(0.99, sum by (le, method) (increase(demo_rpc_duration_seconds_bucket{client=\"grpc-go\", region=~\"$region\"}[$__range])))",
+              "legendFormat": "",
+              "refId": "Q1",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-go\", region=~\"$region\", code=~\".+\", code!=\"OK\"}[$__range])) or sum by (method) (increase(demo_rpc_duration_seconds_count{client=\"grpc-go\", region=~\"$region\"}[$__range])) * 0",
+              "legendFormat": "",
+              "refId": "F1",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true
+                },
+                "indexByName": {
+                  "method": 0,
+                  "Value #N0": 1,
+                  "Value #P0": 2,
+                  "Value #Q0": 3,
+                  "Value #F0": 4,
+                  "Value #N1": 5,
+                  "Value #P1": 6,
+                  "Value #Q1": 7,
+                  "Value #F1": 8
+                },
+                "renameByName": {
+                  "method": "Method",
+                  "Value #N0": "grpc-java calls",
+                  "Value #P0": "grpc-java p50",
+                  "Value #Q0": "grpc-java p99",
+                  "Value #F0": "grpc-java failed",
+                  "Value #N1": "grpc-go calls",
+                  "Value #P1": "grpc-go p50",
+                  "Value #Q1": "grpc-go p99",
+                  "Value #F1": "grpc-go failed"
+                }
+              }
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "sort": [
+                  {
+                    "field": "grpc-java calls",
+                    "desc": true
+                  }
+                ]
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "decimals": 2,
+              "custom": {
+                "align": "auto"
+              },
+              "mappings": [
+                {
+                  "type": "special",
+                  "options": {
+                    "match": "nan",
+                    "result": {
+                      "text": "\u2013",
+                      "color": "text"
+                    }
+                  }
+                }
+              ]
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byRegexp",
+                  "options": ".* (calls|failed)$"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "none"
+                  },
+                  {
+                    "id": "decimals",
+                    "value": 0
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Method"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "string"
+                  }
+                ]
+              }
+            ]
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "GemFire servers: what the cluster sees",
+      "id": 25,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 71
+      },
       "panels": []
     },
     {
       "type": "timeseries",
-      "id": 19,
+      "id": 26,
       "title": "Region gets/s per server (/crud)",
       "description": "PartitionedRegionStats.getsCompleted, from all clients combined.",
       "datasource": {
@@ -10373,7 +11221,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 48
+        "y": 72
       },
       "targets": [
         {
@@ -10468,7 +11316,7 @@
     },
     {
       "type": "timeseries",
-      "id": 20,
+      "id": 27,
       "title": "Region puts/s per server (/crud)",
       "description": "",
       "datasource": {
@@ -10479,7 +11327,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 48
+        "y": 72
       },
       "targets": [
         {
@@ -10574,7 +11422,7 @@
     },
     {
       "type": "timeseries",
-      "id": 21,
+      "id": 28,
       "title": "Puts forwarded to the owning server",
       "description": "PartitionedRegionStats.putRemoteCompleted: puts that arrived at a server that doesn't own the bucket and had to be forwarded. Both gRPC clients send everything to server1, so about half their writes take this extra hop. Native single-hop sends each op straight to the owner.",
       "datasource": {
@@ -10585,7 +11433,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 48
+        "y": 72
       },
       "targets": [
         {
@@ -10680,7 +11528,7 @@
     },
     {
       "type": "timeseries",
-      "id": 22,
+      "id": 29,
       "title": "Client connections per server",
       "description": "native: CacheServerStats.currentClientConnections (pooled sockets). gRPC: GrpcServerStats.grpc.server.connections (one multiplexed HTTP/2 connection per gRPC client). The only statistic the gRPC extension registers.",
       "datasource": {
@@ -10691,7 +11539,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 48
+        "y": 72
       },
       "targets": [
         {
@@ -10750,7 +11598,7 @@
     },
     {
       "type": "timeseries",
-      "id": 23,
+      "id": 30,
       "title": "Heap used per member",
       "description": "",
       "datasource": {
@@ -10761,7 +11609,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 80
       },
       "targets": [
         {
@@ -10856,7 +11704,7 @@
     },
     {
       "type": "timeseries",
-      "id": 24,
+      "id": 31,
       "title": "Cache-server (native protocol) requests/s",
       "description": "CacheServerStats counts only native-protocol traffic on port 40404. gRPC requests don't pass through the cache server, so they don't show up here.",
       "datasource": {
@@ -10867,7 +11715,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 56
+        "y": 80
       },
       "targets": [
         {
@@ -10926,19 +11774,19 @@
     {
       "type": "row",
       "title": "Resource cost (cAdvisor)",
-      "id": 25,
+      "id": 32,
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 88
       },
       "panels": []
     },
     {
       "type": "timeseries",
-      "id": 26,
+      "id": 33,
       "title": "CPU: clients (cores)",
       "description": "",
       "datasource": {
@@ -10949,7 +11797,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 65
+        "y": 89
       },
       "targets": [
         {
@@ -11090,7 +11938,7 @@
     },
     {
       "type": "timeseries",
-      "id": 27,
+      "id": 34,
       "title": "CPU: GemFire members (cores)",
       "description": "server1 is the gRPC entry point. It also decodes protobuf and forwards requests for buckets it doesn't own.",
       "datasource": {
@@ -11101,7 +11949,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 65
+        "y": 89
       },
       "targets": [
         {
@@ -11242,7 +12090,7 @@
     },
     {
       "type": "timeseries",
-      "id": 28,
+      "id": 35,
       "title": "Client CPU per request",
       "description": "Client container CPU-seconds per request k6 completed (selected runs). Lower is cheaper. Empty between runs.",
       "datasource": {
@@ -11253,7 +12101,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 65
+        "y": 89
       },
       "targets": [
         {
@@ -11348,7 +12196,7 @@
     },
     {
       "type": "timeseries",
-      "id": 29,
+      "id": 36,
       "title": "Memory working set",
       "description": "",
       "datasource": {
@@ -11359,7 +12207,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 65
+        "y": 89
       },
       "targets": [
         {

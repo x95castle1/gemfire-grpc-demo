@@ -73,8 +73,11 @@ with native, e.g. `grpc-java vs native: 73% slower`. It saves everything under
 - **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN`/`83NN` on the host). Each
   runs a narrated demo with assertions at startup (`POST /demo` re-runs it; 200 means everything
   passed) and serves `/crud/*` for load tests.
-- **The same metric names in every client**: `demo_op_latency_seconds{client,op}` (histogram),
-  `demo_errors_total{client,op,code}` and `demo_checks_total{client,result}`.
+- **The same metric names in every client**, with buckets from 50 µs to 2.5 s:
+  - `demo_op_latency_seconds{client,region,op,code}`: one `/crud` operation's GemFire work,
+    failures included (`code` is `OK`, a gRPC status code, or a native exception class).
+  - `demo_rpc_duration_seconds{client,region,method,code}`: every gRPC call, streaming ones
+    included, recorded by a gRPC client interceptor (gRPC clients only).
 - **Colors** follow the client in every dashboard: native-java is blue, grpc-java is orange, and
   grpc-go is aqua.
 - **Ports**: example *NN* uses Grafana `30NN`, Prometheus `90NN`, grpc-java `81NN`,

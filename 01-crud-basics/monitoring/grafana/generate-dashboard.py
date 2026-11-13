@@ -139,6 +139,10 @@ OP = 'op=~"$op"'
 GF = "k6_gemfire_call_duration_seconds"   # X-GemFire-Micros: the GemFire call alone
 E2E = "k6_http_req_duration_seconds"      # the whole HTTP request as k6 saw it
 REQS = "k6_http_reqs_total"
+# The clients' own metrics: they carry region and code labels, but no run tag.
+OPS_M = "demo_op_latency_seconds"     # one /crud operation, failures included (code != "OK")
+RPC_M = "demo_rpc_duration_seconds"   # every gRPC call, from the gRPC clients' interceptors
+REGION = 'region=~"$region"'
 
 
 CPU_BY_CLIENT = ('sum by (client) (label_replace(rate(container_cpu_usage_seconds_total{service=~".*-client-.*"}[1m]),'
@@ -168,13 +172,24 @@ panels.append(row("At a glance: selected load runs over the time range", y)); y 
 glance = ("Computed over the whole time range for the runs picked in the \"load run\" dropdown, "
           "so the panel keeps its numbers after a run ends. ")
 panels.append(stat("Peak throughput", per_client(lambda c: f'max_over_time(sum(rate({REQS}{{{RUN}, client="{c}"}}[30s]))[$__range:10s])'),
-                   0, y, 8, 4, unit="suffix: req/s", colors=CLIENT_COLORS, decimals=0,
+                   0, y, 6, 4, unit="suffix: req/s", colors=CLIENT_COLORS, decimals=0,
                    desc=glance + "Highest requests/s k6 sustained (30-second windows) against each client."))
-panels.append(stat("GemFire call p50", per_client(lambda c: over_range(0.5, GF, c)), 8, y, 8, 4, unit="s",
+panels.append(stat("GemFire call p50", per_client(lambda c: over_range(0.5, GF, c)), 6, y, 6, 4, unit="s",
                    colors=CLIENT_COLORS, decimals=2,
                    desc=glance + "Median time inside the GemFire call (gRPC RPC or Region API call), as each client reported it."))
-panels.append(stat("GemFire call p99", per_client(lambda c: over_range(0.99, GF, c)), 16, y, 8, 4, unit="s",
+panels.append(stat("GemFire call p99", per_client(lambda c: over_range(0.99, GF, c)), 12, y, 6, 4, unit="s",
                    colors=CLIENT_COLORS, decimals=2, desc=glance + "99th percentile of the GemFire call."))
+def failed_share(c):
+    calls = f'sum(increase({OPS_M}_count{{client="{c}", {REGION}}}[$__range]))'
+    failed = f'sum(increase({OPS_M}_count{{client="{c}", {REGION}, code=~".+", code!="OK"}}[$__range]))'
+    return f"({failed} or vector(0)) / {calls}"
+fail_stat = stat("Failed calls", per_client(failed_share), 18, y, 6, 4, unit="percentunit", decimals=2,
+                 colors=CLIENT_COLORS,
+                 desc="Share of /crud operations whose GemFire call failed, over the time range, from the "
+                      "clients' own demo_op_latency_seconds{code!=\"OK\"}. It counts every caller (k6 and curl alike), "
+                      "so it ignores the load run dropdown; the region dropdown applies.")
+fail_stat["fieldConfig"]["defaults"]["mappings"] = [NO_DATA]
+panels.append(fail_stat)
 y += 4
 
 # --- Run summary table (same columns as the terminal table) --------------------------------------
@@ -263,13 +278,22 @@ panels.append(row("GemFire call latency: native vs gRPC (op: $op)", y)); y += 1
 for i, (pct, label) in enumerate([(0.5, "p50"), (0.99, "p99")]):
     panels.append(timeseries(f"GemFire call {label} (op: $op)",
                              per_client(lambda c: k6q(pct, GF, c, extra=f", {OP}")),
-                             i * 8, y, 8, 8, unit="s", colors=CLIENT_COLORS,
+                             i * 6, y, 6, 8, unit="s", colors=CLIENT_COLORS,
                              desc="Time inside the GemFire call, per client. Narrow it to some operations with the `op` dropdown."))
 panels.append(timeseries(
-    "Errors/s by client and code",
-    [target("sum by (client, code) (rate(demo_errors_total[1m])) or sum by (client) (rate(demo_op_latency_seconds_count[1m])) * 0", "{{client}} {{code}}")],
-    16, y, 8, 8, unit="ops", colors=CLIENT_COLORS,
-    desc="Failed GemFire calls, from the clients' own counters. gRPC: status code. Native: exception class. Flat zero = no errors."))
+    "Failed calls/s by client and code",
+    [target(f'sum by (client, code) (rate({OPS_M}_count{{{REGION}, code=~".+", code!="OK"}}[1m])) '
+            f'or sum by (client) (rate({OPS_M}_count{{{REGION}}}[1m])) * 0', "{{client}} {{code}}")],
+    12, y, 6, 8, unit="ops", colors=CLIENT_COLORS,
+    desc="/crud operations whose GemFire call failed, from the clients' own demo_op_latency_seconds{code!=\"OK\"}. "
+         "gRPC: status code. Native: exception class. Flat zero = no failures."))
+panels.append(timeseries(
+    "Latency of failed calls (p99)",
+    [target(f'histogram_quantile(0.99, sum by (le, client, code) (rate({OPS_M}_bucket{{{REGION}, code=~".+", code!="OK"}}[1m])))',
+            "{{client}} {{code}}")],
+    18, y, 6, 8, unit="s", colors=CLIENT_COLORS,
+    desc="How long failed calls took before they failed. A timeout (DEADLINE_EXCEEDED) is a slow failure; "
+         "most other errors fail fast. Empty while nothing fails."))
 y += 8
 
 # Per-op comparison table: quantiles over the whole time range for the selected runs.
@@ -310,6 +334,68 @@ panels.append({
                             {"id": "mappings", "value": ratio_words()},
                             {"id": "custom.cellOptions", "value": {"type": "color-text"}}]},
             {"matcher": {"id": "byName", "options": "Operation"},
+             "properties": [{"id": "unit", "value": "string"}]},
+        ]},
+    "options": {"showHeader": True, "cellHeight": "sm", "footer": {"show": False}},
+})
+y += 15
+
+# --- gRPC calls (interceptor) -------------------------------------------------------------------
+# What the gRPC library actually did: every RPC on each gRPC client's channel, streams and the
+# demo's calls included. The native client has no interceptors, so it isn't in this row.
+GRPC_CLIENTS = ["grpc-java", "grpc-go"]
+
+
+def per_grpc_client(expr_for, legend="{c}"):
+    return [target(expr_for(c), legend.format(c=c), chr(65 + i)) for i, c in enumerate(GRPC_CLIENTS)]
+
+
+panels.append(row("gRPC calls (interceptor): every RPC, streams included", y)); y += 1
+panels.append(timeseries("RPCs/s",
+                         per_grpc_client(lambda c: f'sum(rate({RPC_M}_count{{client="{c}", {REGION}}}[1m]))'),
+                         0, y, 8, 8, unit="ops", colors=CLIENT_COLORS,
+                         desc="gRPC calls per second per client, from demo_rpc_duration_seconds (an interceptor on each channel)."))
+panels.append(timeseries("RPC p99", per_grpc_client(
+    lambda c: f'histogram_quantile(0.99, sum by (le) (rate({RPC_M}_bucket{{client="{c}", {REGION}}}[1m])))'),
+                         8, y, 8, 8, unit="s", colors=CLIENT_COLORS,
+                         desc="99th percentile of a gRPC call, start to close. For a stream that's the whole stream."))
+panels.append(timeseries("RPCs/s by status code",
+                         [target(f'sum by (client, code) (rate({RPC_M}_count{{{REGION}}}[1m]))', "{{client}} {{code}}")],
+                         16, y, 8, 8, unit="ops", colors=CLIENT_COLORS,
+                         desc="Every gRPC call by its final status code, OK included."))
+y += 8
+# Per-method table over the whole time range.
+rpc_q = lambda fn: f"sum by (method) (increase({RPC_M}_{fn}{{client=\"%s\", {REGION}}}[$__range]))"
+rpc_targets = []
+for i, c in enumerate(GRPC_CLIENTS):
+    rpc_targets.append(target(rpc_q("count") % c, "", f"N{i}", True, "table"))
+    rpc_targets.append(target(f'histogram_quantile(0.5, sum by (le, method) (increase({RPC_M}_bucket{{client="{c}", {REGION}}}[$__range])))', "", f"P{i}", True, "table"))
+    rpc_targets.append(target(f'histogram_quantile(0.99, sum by (le, method) (increase({RPC_M}_bucket{{client="{c}", {REGION}}}[$__range])))', "", f"Q{i}", True, "table"))
+    rpc_targets.append(target(f'sum by (method) (increase({RPC_M}_count{{client="{c}", {REGION}, code=~".+", code!="OK"}}[$__range])) '
+                              f'or sum by (method) (increase({RPC_M}_count{{client="{c}", {REGION}}}[$__range])) * 0', "", f"F{i}", True, "table"))
+rpc_names = {}
+for i, c in enumerate(GRPC_CLIENTS):
+    rpc_names.update({f"Value #N{i}": f"{c} calls", f"Value #P{i}": f"{c} p50",
+                      f"Value #Q{i}": f"{c} p99", f"Value #F{i}": f"{c} failed"})
+panels.append({
+    "type": "table", "id": nid(), "title": "gRPC calls by method (whole time range)", "datasource": DS,
+    "description": "Every gRPC method each client called, from its interceptor: count, latency and failures. "
+                   "PutStream is the preload; the demo's calls count too.",
+    "gridPos": {"h": 15, "w": 24, "x": 0, "y": y}, "targets": rpc_targets,
+    "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {
+            "excludeByName": {"Time": True},
+            "indexByName": {"method": 0, **{k: i + 1 for i, k in enumerate(rpc_names)}},
+            "renameByName": {"method": "Method", **rpc_names}}},
+        {"id": "sortBy", "options": {"sort": [{"field": "grpc-java calls", "desc": True}]}},
+    ],
+    "fieldConfig": {
+        "defaults": {"unit": "s", "decimals": 2, "custom": {"align": "auto"}, "mappings": [NO_DATA]},
+        "overrides": [
+            {"matcher": {"id": "byRegexp", "options": ".* (calls|failed)$"},
+             "properties": [{"id": "unit", "value": "none"}, {"id": "decimals", "value": 0}]},
+            {"matcher": {"id": "byName", "options": "Method"},
              "properties": [{"id": "unit", "value": "string"}]},
         ]},
     "options": {"showHeader": True, "cellHeight": "sm", "footer": {"show": False}},
@@ -378,6 +464,20 @@ panels.append(timeseries("Memory working set",
                          18, y, 6, 8, unit="bytes", colors=SERVICE_COLORS))
 y += 8
 
+# Rows that start collapsed: move each one's panels inside it.
+COLLAPSED = {"gRPC calls (interceptor): every RPC, streams included"}
+flat, panels, current = panels, [], None
+for p in flat:
+    if p["type"] == "row":
+        current = p if p["title"] in COLLAPSED else None
+        if current:
+            p["collapsed"] = True
+        panels.append(p)
+    elif current is not None:
+        current["panels"].append(p)
+    else:
+        panels.append(p)
+
 dashboard = {
     "uid": "crud-native-vs-grpc",
     "title": "01 · CRUD basics: native vs gRPC",
@@ -401,6 +501,13 @@ dashboard = {
         "definition": f"label_values({GF}, op)",
         "multi": True, "includeAll": True, "allValue": ".*", "refresh": 2, "sort": 1,
         "current": {"selected": True, "text": ["All"], "value": ["$__all"]},
+    }, {
+        "name": "region", "label": "region", "type": "query", "datasource": DS,
+        "description": "Filters the panels that read the clients' own metrics (failed calls, the gRPC calls row). k6 doesn't know regions.",
+        "query": {"query": f'label_values({{__name__=~"{OPS_M}_count|{RPC_M}_count"}}, region)', "refId": "region"},
+        "definition": f'label_values({{__name__=~"{OPS_M}_count|{RPC_M}_count"}}, region)',
+        "multi": True, "includeAll": True, "allValue": ".*", "refresh": 2, "sort": 1,
+        "current": {"selected": True, "text": ["All"], "value": ["$__all"]},
     }]},
     "annotations": {"list": [{
         "name": "Load tests", "enable": True, "iconColor": "rgba(150, 150, 150, 0.6)",
@@ -413,4 +520,4 @@ dashboard = {
 out = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else \
     pathlib.Path(__file__).parent / "dashboards" / "crud-native-vs-grpc.json"
 out.write_text(json.dumps(dashboard, indent=2) + "\n")
-print(f"wrote {out} ({len(panels)} panels)")
+print(f"wrote {out} ({len(panels)} top-level panels, {sum(len(p.get('panels', [])) for p in panels)} in collapsed rows)")

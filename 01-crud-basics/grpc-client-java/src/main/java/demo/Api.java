@@ -173,14 +173,14 @@ final class Api {
         result = crud.execute(op, key == null ? null : cfg.keyPrefix() + key, size);
       } catch (Exception e) {
         String code = crud.errorCode(e);
-        metrics.recordError(op, code);
+        metrics.recordOp(op, code, System.nanoTime() - start);   // failures are timed too
         ex.getResponseHeaders().set("X-Error-Code", code);
         send(ex, 502, "application/json", String.format(
             "{\"op\":\"%s\",\"error\":\"%s\",\"message\":\"%s\"}", op, code, json(String.valueOf(e.getMessage()))));
         return;
       }
       long nanos = System.nanoTime() - start;
-      metrics.recordLatency(op, nanos);
+      metrics.recordOp(op, "OK", nanos);
 
       StringBuilder body = new StringBuilder().append("{\"op\":\"").append(op).append('"');
       if (key != null) body.append(",\"key\":\"").append(json(key)).append('"');

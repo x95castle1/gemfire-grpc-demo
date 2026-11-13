@@ -9,8 +9,15 @@ import io.prometheus.metrics.instrumentation.jvm.JvmMetrics;
  * In-app metrics, served at /metrics by {@link Api}. Names and labels are identical in every
  * client of every example so the Grafana dashboards compare them directly.
  *
- * <p>{@code demo_op_latency_seconds} times only the GemFire call (gRPC RPC or Region API call),
- * not the HTTP request around it. k6 measures the end-to-end request separately.
+ * <ul>
+ *   <li>{@code demo_op_latency_seconds{client,example,region,op,code}} times one /crud operation's
+ *       GemFire work (a gRPC RPC, or the Region API call(s) that do the same job), not the HTTP
+ *       request around it. Failures are timed too, with the gRPC status code or exception class as
+ *       {@code code} ("OK" on success). k6 measures the end-to-end request separately.
+ *   <li>{@code demo_rpc_duration_seconds{client,example,region,method,code}} times every gRPC call
+ *       the client makes, streaming ones and the demo's included. It's recorded by a gRPC client
+ *       interceptor, so the native client never has any.
+ * </ul>
  */
 final class Metrics {
 
@@ -22,27 +29,31 @@ final class Metrics {
 
   private final String client;
   private final String example;
+  private final String region;
   private final Histogram latency;
-  private final Counter errors;
+  private final Histogram rpcs;
   private final Counter checks;
 
   Metrics(Config cfg) {
     this.client = cfg.client();
     this.example = cfg.example();
+    this.region = cfg.region();
     JvmMetrics.builder().register();
     latency =
         Histogram.builder()
             .name("demo_op_latency_seconds")
-            .help("Latency of one GemFire call made by the client (excludes HTTP)")
-            .labelNames("client", "example", "op")
+            .help("Latency of one /crud operation's GemFire work, by result code (excludes HTTP)")
+            .labelNames("client", "example", "region", "op", "code")
             .classicUpperBounds(LATENCY_BUCKETS)
             .classicOnly()
             .register();
-    errors =
-        Counter.builder()
-            .name("demo_errors")
-            .help("Failed GemFire calls by status code / exception type")
-            .labelNames("client", "example", "op", "code")
+    rpcs =
+        Histogram.builder()
+            .name("demo_rpc_duration_seconds")
+            .help("Duration of each gRPC call the client made, by method and status code")
+            .labelNames("client", "example", "region", "method", "code")
+            .classicUpperBounds(LATENCY_BUCKETS)
+            .classicOnly()
             .register();
     checks =
         Counter.builder()
@@ -50,7 +61,10 @@ final class Metrics {
             .help("Demo assertions by result")
             .labelNames("client", "example", "result")
             .register();
-    // Pre-create the series so the dashboard shows 0 instead of "no data".
+    // Pre-create the series so the dashboard shows 0 instead of "no data". For counters and
+    // histograms this also matters for increase(): Prometheus can't see a series' first
+    // observation, so a series that first appears already at 1 would count as 0.
+    for (String op : Api.OPS.values()) latency.labelValues(client, example, region, op, "OK");
     checks.labelValues(client, example, "pass");
     checks.labelValues(client, example, "fail");
   }
@@ -59,13 +73,23 @@ final class Metrics {
     return new MetricsHandler();
   }
 
-  void recordLatency(String op, long nanos) {
-    latency.labelValues(client, example, op).observe(nanos / 1e9);
+  /** One /crud operation: code is "OK", a gRPC status code, or an exception class name. */
+  void recordOp(String op, String code, long nanos) {
+    latency.labelValues(client, example, region, op, code).observe(nanos / 1e9);
   }
 
-  void recordError(String op, String code) {
-    errors.labelValues(client, example, op, code).inc();
+  /** Pre-creates the OK series of every gRPC method in these regions (see the constructor). */
+  void initRpcs(Iterable<String> methods, String... regions) {
+    for (String method : methods) {
+      for (String r : regions) rpcs.labelValues(client, example, r, method, "OK");
+    }
   }
+
+  /** One gRPC call (recorded by the gRPC client's interceptor). */
+  void recordRpc(String method, String rpcRegion, String code, long nanos) {
+    rpcs.labelValues(client, example, rpcRegion, method, code).observe(nanos / 1e9);
+  }
+
 
   void recordCheck(boolean passed) {
     checks.labelValues(client, example, passed ? "pass" : "fail").inc();

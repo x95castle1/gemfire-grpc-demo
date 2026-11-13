@@ -69,8 +69,10 @@ $ curl -s -X POST 'localhost:8101/crud/get-and-put?key=7&size=10'
 ```
 
 Every `/crud` response carries the header **`X-GemFire-Micros`**: the time spent inside the
-GemFire call alone. k6 records it next to its own end-to-end timing. The same number is the
-`demo_op_latency_seconds` histogram on the dashboards.
+GemFire call alone. k6 records it next to its own end-to-end timing, and that copy is what the
+dashboard and the terminal table show. Each client also records the same timing in its own
+`demo_op_latency_seconds` histogram, failures included, and the gRPC clients time every RPC
+(streams too) in `demo_rpc_duration_seconds` with an interceptor.
 
 Settings in [`.env`](.env): `DEMO_ON_START`, `PAYLOAD_BYTES` (default value size; requests can
 override it with `?size=`), `HTTP_THREADS`, and the host ports.
@@ -194,6 +196,17 @@ same numbers as the terminal table.
   forwarding) and burns about 2–3 times the CPU of `server2`.
 - **Cache-server requests/s.** Only native traffic shows up here. gRPC requests bypass the
   cache-server (port 40404) statistics entirely.
+
+- **Failed calls.** The "Failed calls" stat, the failed-calls/s panel and the "Latency of failed
+  calls" panel come from the clients' own `demo_op_latency_seconds{code!="OK"}`. Try
+  `curl -X POST 'localhost:8101/crud/put?key=big&size=5000000'`: it fails over gRPC with
+  `RESOURCE_EXHAUSTED` after tens of milliseconds (most of it spent sending 5 MB), and succeeds
+  natively. These panels count every caller,
+  curl included, so they ignore the **load run** dropdown. The **region** dropdown applies.
+- **gRPC calls (interceptor)**, collapsed at the bottom. Every RPC each gRPC client made, from an
+  interceptor on its channel, including the `PutStream` preload and the demo's calls. It shows
+  calls/s, p99 and status codes, plus a per-method table. In 01 it mostly mirrors the
+  per-operation table; it becomes the main view for streams in 02.
 
 ## Findings and gotchas
 

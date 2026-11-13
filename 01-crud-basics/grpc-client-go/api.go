@@ -190,12 +190,12 @@ func (a *Api) crudHandler(w http.ResponseWriter, r *http.Request) {
 	elapsed := time.Since(start)
 	if err != nil {
 		code := errorCode(err)
-		a.metrics.recordError(o.rpc, code)
+		a.metrics.recordOp(o.rpc, code, elapsed) // failures are timed too
 		w.Header().Set("X-Error-Code", code)
 		send(w, r, 502, "application/json", fmt.Sprintf(`{"op":"%s","error":"%s","message":%s}`, o.rpc, code, jsonString(err.Error())))
 		return
 	}
-	a.metrics.recordLatency(o.rpc, elapsed)
+	a.metrics.recordOp(o.rpc, "OK", elapsed)
 
 	var body strings.Builder
 	fmt.Fprintf(&body, `{"op":"%s"`, o.rpc)

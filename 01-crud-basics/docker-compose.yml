@@ -148,12 +148,17 @@ services:
 
   # Per-container CPU / memory, so client resource cost can be compared too.
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    image: ghcr.io/google/cadvisor:v0.60.6
     privileged: true
     command:
       - --docker_only=true
       - --housekeeping_interval=5s
       - --store_container_labels=true
+      # With Docker's containerd image store (`docker info`: Storage Driver overlayfs), cAdvisor
+      # looks containers up through containerd. Without the socket it reports only the root
+      # cgroup and every cAdvisor panel is empty. Reached via the /rootfs mount, because Docker
+      # Desktop resolves a /var/run bind mount to the Mac's own /var/run, not the VM's.
+      - --containerd=/rootfs/run/containerd/containerd.sock
     volumes:
       - /:/rootfs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

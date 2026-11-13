@@ -248,6 +248,35 @@ same numbers as the terminal table.
    protocol. Where the gRPC library *does* matter is client cost: grpc-go uses about 40% less
    CPU per request than grpc-java.
 
+   [`bucket-latency.py`](../load-testing/probes/bucket-latency.py) groups keys by bucket
+   (`abs(key.hashCode() % 113)`) to show how the gap divides. p50 of the GemFire call in µs,
+   `Get` on a warm stack, one request at a time (`Put` came out within 6 µs of every cell):
+
+   | Bucket owned by | native-java | grpc-go | grpc-java |
+   |---|---|---|---|
+   | `server1`, the gRPC entry point | 54 | 134 | 169 |
+   | `server2`, so gRPC forwards | 54 | 187 | 223 |
+
+   - **The forward to `server2` costs about 55 µs**, on the half of the keys it applies to (57
+     of the 113 buckets). Native shows no difference between the servers.
+   - **The gRPC path costs about 80 µs with no forward at all**: on `server1`'s own buckets
+     grpc-go still takes 2.5 times as long as native. That is about three quarters of the
+     average gap.
+   - **The gRPC library accounts for about 35 µs**: grpc-java minus grpc-go, against the same
+     server.
+
+   The 80 µs can't be divided further between the client library, HTTP/2 and the server's gRPC
+   service, because the extension has no per-RPC metrics (finding 1).
+8. **cAdvisor needs containerd's socket when Docker uses the containerd image store.** With that
+   store (`docker info` shows `Storage Driver: overlayfs`), cAdvisor v0.52 fails on every
+   container with `failed to identify the read-write layer ID` and exports only the root cgroup.
+   Its scrape target stays `up`, but the "Resource cost (cAdvisor)" panels say "No data" and
+   CPU/REQ prints `-`. It takes two changes, both in `docker-compose.yml`: cAdvisor v0.54 or
+   later (current releases are at `ghcr.io/google/cadvisor`), and
+   `--containerd=/rootfs/run/containerd/containerd.sock`, because newer versions look containers
+   up through containerd. Mounting all of `/var/run` instead, the usual cAdvisor recipe, doesn't
+   work on Docker Desktop for Mac: that path resolves to the Mac's own `/var/run`.
+
 ## Layout
 
 ```

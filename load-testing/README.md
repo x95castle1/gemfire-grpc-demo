@@ -49,6 +49,7 @@ load-testing/
 ├── lib/bulk.js        # /bulk helpers (02): bulk calls, the bulk_entries counter, modes, per-VU key ranges
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
+├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```
 
@@ -128,3 +129,21 @@ Each run gets `results/<yyyymmdd-hhmmss>-<example>-<script>/`, containing:
 A run exits non-zero if any client's k6 thresholds failed. The default threshold is under 1% failed requests.
 If a client's k6 run never got to its scenario (for example, setup failed), its row shows dashes
 and the reason, e.g. `FAIL (setup failed: preload failed: 404 ...)`, and its "vs" rows are left out.
+
+## Probes
+
+`probes/` holds measurements that don't fit a k6 run, as plain Python (standard library only).
+They aren't in the `make select-load-test` menu and push no k6 metrics, so the dashboard's
+load-run panels don't show them. The example must already be running.
+
+- `probes/bucket-latency.py` (01: it needs the `/crud` API) times `Get` and `Put` per key
+  through each client, one request at a time, and groups the timings by partitioned-region
+  bucket. It shows what a gRPC client pays when its server has to forward to the bucket's owner,
+  and that the native client doesn't pay it
+  (see [01, finding 7](../01-crud-basics/README.md#findings-and-gotchas)). Like the crud
+  scripts, it preloads keys `0..999` for each client into the `crud` region.
+
+  ```bash
+  python3 load-testing/probes/bucket-latency.py          # example 01, 8 rounds, about 20 s
+  python3 load-testing/probes/bucket-latency.py 01 20    # example number, rounds
+  ```

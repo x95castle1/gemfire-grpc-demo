@@ -129,6 +129,9 @@ supported=$(header "$file" Clients | tr -d ' ')
 bulk=0; [[ "$SCRIPT" == bulk/* ]] && bulk=1
 # "// Breakdown: mode=stream,unary×16,unary×1": a tag whose values each get their own table rows.
 breakdown=$(header "$file" Breakdown | tr -d ' ')
+# "// Events: 40s stop server1, 80s start server1": docker compose actions on the example's own
+# services while k6 runs (seconds after k6 starts), e.g. to test failover. See runEvents.
+events=$(header "$file" Events)
 
 # --- 4. Client(s) ------------------------------------------------------------------------------
 targets=()
@@ -173,8 +176,14 @@ jq -n --arg ex "$dir" --arg script "$SCRIPT" --arg run "$RUN" --arg args "$K6_AR
 cp "$file" "$results/"
 
 containers=()
-cleanup() { [ ${#containers[@]} -gt 0 ] && docker rm -f "${containers[@]}" >/dev/null 2>&1; }
-trap 'printf "\e[?25h"; echo; echo "Interrupted, stopping k6..."; cleanup; exit 130' INT TERM
+eventsPid=
+cleanup() {
+  [ -n "$eventsPid" ] && kill "$eventsPid" 2>/dev/null
+  [ ${#containers[@]} -gt 0 ] && docker rm -f "${containers[@]}" >/dev/null 2>&1
+}
+trap 'printf "\e[?25h"; echo; echo "Interrupted, stopping k6..."; cleanup
+      [ -n "$events" ] && echo "Events were cut short; check the cluster: make status (start anything stopped with docker compose start)"
+      exit 130' INT TERM
 
 # In a terminal, show k6 at work. Sequential runs get k6's own interactive screen (banner, live
 # progress bar, end-of-test summary). Parallel runs get liveScreen below. Without a terminal
@@ -314,6 +323,31 @@ annotate() {   # start_ms end_ms text
 }
 nowMs() { python3 -c 'import time; print(int(time.time()*1000))'; }
 
+# Runs the script's Events in the background: each one at its offset after k6 starts, logged to
+# events.log and annotated on the Grafana dashboard. Only the example's own compose services.
+runEvents() {
+  local spec at action svc t0=$SECONDS
+  local -a specs
+  IFS=',' read -r -a specs <<< "$events"
+  for spec in "${specs[@]}"; do
+    read -r at action svc <<< "$spec"
+    at=${at%s}
+    while [ $((SECONDS - t0)) -lt "$at" ]; do sleep 1; done
+    if (cd "$dir" && docker compose "$action" "$svc" >/dev/null 2>&1); then
+      echo "$(date +%T)  +${at}s  ${action} ${svc}" >> "$results/events.log"
+    else
+      echo "$(date +%T)  +${at}s  ${action} ${svc}  FAILED" >> "$results/events.log"
+    fi
+    annotate "$(nowMs)" "$(nowMs)" "${action} ${svc}"
+  done
+}
+if [ -n "$events" ]; then
+  echo "Events while k6 runs (seconds after it starts): ${events}"
+  echo
+  : > "$results/events.log"
+  runEvents & eventsPid=$!
+fi
+
 runStart=$(nowMs)
 if [ "$RUN" = parallel ]; then
   pids=()
@@ -347,6 +381,7 @@ else
     echo
   done
 fi
+[ -n "$eventsPid" ] && wait "$eventsPid"   # every event done (e.g. a stopped server started again)
 trap - INT TERM
 
 # --- 6. Comparison table -----------------------------------------------------------------------
@@ -500,6 +535,36 @@ breakdownTable() {
     done
   fi
 }
+# The same for request scripts (not bulk/*): calls, failed share and GemFire call p50/p99 per tag
+# value, which all ran at the same time, plus "v vs first value" rows.
+requestBreakdownTable() {
+  local tag=${breakdown%%=*} values i c f line calls failed g50 g99
+  IFS=',' read -r -a values <<< "${breakdown#*=}"
+  echo
+  echo "By ${tag}: rows compare each ${tag} with ${values[0]} (all ran at the same time)"
+  printf '%s │ %8s %8s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS FAILED 'GF p50' 'p99'
+  printf '%s │ %8s %8s │ %11s %11s\n' "$(label '' 36)" '' '' '(ms)' '(ms)'
+  for c in "${targets[@]}"; do
+    ranOk "$c" || continue
+    f="$results/${c}.json"
+    for i in "${!values[@]}"; do
+      line=$(jq -r --arg t "${tag}:${values[$i]}" '.metrics as $m | [
+          ($m["http_reqs{" + $t + "}"].count // 0), (($m["http_req_failed{" + $t + "}"].value // 0) * 100),
+          ($m["gemfire_call_duration{" + $t + "}"].med // 0), ($m["gemfire_call_duration{" + $t + "}"]["p(99)"] // 0)
+        ] | map(tostring) | join(" ")' "$f")
+      kvSet "rb${i}" "$c" "$line"
+      read -r calls failed g50 g99 <<< "$line"
+      printf '%s │ %8s %7.2f%% │ %11.3f %11.3f\n' "$(label "${c} · ${values[$i]}" 36)" "$calls" "$failed" "$g50" "$g99"
+    done
+    for i in "${!values[@]}"; do
+      [ "$i" -eq 0 ] && continue
+      local a b
+      read -r -a a <<< "$(kvGet "rb${i}" "$c")"; read -r -a b <<< "$(kvGet rb0 "$c")"
+      printf '%s │ %8s %8s │ %s %s\n' "$(label "${c} · ${values[$i]} vs ${values[0]}" 36)" '' '' \
+        "$(ratio "${a[2]}" "${b[2]}" 11 time)" "$(ratio "${a[3]}" "${b[3]}" 11 time)"
+    done
+  done
+}
 breakdownRatio() {   # label "calls entries eps p50 p99" (a) "..." (b)
   local a b
   read -r -a a <<< "$2"; read -r -a b <<< "$3"
@@ -555,7 +620,14 @@ echo
   [ ${#targets[@]} -gt 1 ] && echo "\"A vs B\" rows: how A did compared with B (e.g. \"grpc-go vs grpc-java: 22% faster\" = grpc-go was faster; \"3.1× slower\" = took 3.1 times as long)."
   echo
   if [ $bulk -eq 1 ]; then bulkTable; else table; fi
-  [ -n "$breakdown" ] && breakdownTable
+  if [ -n "$breakdown" ]; then
+    if [ $bulk -eq 1 ]; then breakdownTable; else requestBreakdownTable; fi
+  fi
+  if [ -s "$results/events.log" ]; then
+    echo
+    echo "Events:"
+    sed 's/^/  /' "$results/events.log"
+  fi
 } | tee "$results/summary.raw"
 sed $'s/\e\\[[0-9;]*m//g' "$results/summary.raw" > "$results/summary.txt" && rm -f "$results/summary.raw"   # no colors in the file
 echo

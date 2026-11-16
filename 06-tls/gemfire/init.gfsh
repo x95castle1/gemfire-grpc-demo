@@ -1,0 +1,13 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy.
+connect --locator=locator[10334]
+
+# PARTITION_REDUNDANT: every bucket has a copy on the other server, so when one server stops (the
+# xds/failover load test stops server1) no data is lost, and the test measures routing, not data loss.
+create region --name=tls --type=PARTITION_REDUNDANT --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION_REDUNDANT --if-not-exists
+
+# The gRPC extension runs on every member. On the locator it's the xDS server the client's
+# bootstrap file points at (locator:50051); on the servers it serves the GemFire RPCs.
+describe member --name=locator --extensions
+describe member --name=server1 --extensions
+list regions

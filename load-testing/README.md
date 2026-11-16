@@ -63,6 +63,19 @@ queries into the messages' fields. The queries go through `lib/query.js`, so the
 |---|---|---|
 | `people/steady` | constant arrival rate · `get` 50%, `put` 20%, `by-city` 15%, `age-range` 10%, `nickname` 5% · 100 req/s · 1 m | parallel (one client) |
 
+### xDS scripts (05-xds-discovery, 06-tls)
+
+05's and 06's Go clients reach the cluster over two channels (in 06 both are TLS), `direct` (`dns:///server1:50051`) and
+`xds` (`xds:///gemfire_grpc`). Both scripts run one scenario per channel at the same time, with
+80% Get and 20% Put. The traffic is light on purpose: these scripts are there to show on the
+dashboard which server answers each call, not to measure speed. They break the results down by
+`via`.
+
+| Script | Load | Run |
+|---|---|---|
+| `xds/balance` | both channels · 20 req/s each · 1 m | parallel (one client) |
+| `xds/failover` | both channels · 20 req/s each · 2 m · `Events: 40s stop server1, 80s start server1` · failures allowed | parallel (one client) |
+
 ## Layout
 
 ```
@@ -71,10 +84,12 @@ load-testing/
 ├── lib/bulk.js        # /bulk helpers (02): bulk calls, the bulk_entries counter, modes, per-VU key ranges
 ├── lib/query.js       # /query helpers (03, 04): named OQL calls, the query_rows counter, loading the data
 ├── lib/people.js      # /people helpers (04): Get/Put of Person messages, loading the data
+├── lib/xds.js         # /crud calls with ?via=direct|xds (05): one scenario per channel
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
 ├── scripts/people/    # 04: steady
+├── scripts/xds/       # 05, 06: balance · failover
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```
@@ -89,8 +104,18 @@ load-testing/
 // Clients: native-java, grpc-java, grpc-go   ← clients the script can target
 // Run: parallel                              ← default run style; RUN= overrides it
 // Breakdown: mode=stream,unary×16,unary×1    ← optional: a tag whose values get their own table rows
+// Events: 40s stop server1, 80s start server1 ← optional: docker compose actions while k6 runs
 // Env: RATE=1000 DURATION=5m ...             ← knobs, passed with K6_ARGS="-e RATE=3000"
 ```
+
+- **`Breakdown`:** the script tags its requests with this tag, and its thresholds put the tagged
+  sub-metrics in the summary export. `bulk/*` scripts get entries/s per value. Other scripts get
+  calls, failed share and GF p50/p99 per value, plus a "value vs first value" row.
+- **`Events`:** `make select-load-test` runs each `docker compose <action> <service>` on the
+  example's own services at that many seconds after k6 starts. Each one is logged to `events.log`,
+  printed under the table, and added to the Grafana dashboard as an annotation. It waits for every
+  event to finish before it reports, so a stopped server is always started again. If you interrupt
+  a run, check `make status`.
 
 Scripts that load the cluster as hard as they can (closed-loop VUs) default to `Run: sequential`,
 so each client gets the cluster to itself. Light, fixed-rate scripts run all clients at once.

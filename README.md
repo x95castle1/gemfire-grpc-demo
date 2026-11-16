@@ -26,8 +26,8 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 | 02 | [bulk-streaming](02-bulk-streaming/) | `PutStream`, `GetStream`, `RemoveStream`, `KeySetStream`; chunking, flow control, non-transactional failure; vs. one unary call per entry | `putAll`, `getAll`, `removeAll`, `keySetOnServer` (vs. `put`/`get`/`remove` per entry) | [:3002](http://localhost:3002) | ✅ |
 | 03 | [oql-query](03-oql-query/) | `Query` from a **Go** client: parameters, `field_names`, aggregates, ORDER BY/LIMIT, batching, UNDEFINED, errors | none (Go only, by design) | [:3003](http://localhost:3003) | ✅ |
 | 04 | [structured-values](04-structured-values/) | `google.protobuf.Any` values from a **Go** client, descriptor JAR deploy (`list protobuf-types`), OQL into nested, repeated and enum fields, NULL vs UNDEFINED, unregistered types | none (Go only, by design) | [:3004](http://localhost:3004) | ✅ |
-| 05 | xds-discovery | Locator xDS, round-robin, failover (Java + Go) | Locator pool, single-hop | :3005 | planned |
-| 06 | tls | One-way TLS | Native SSL | :3006 | planned |
+| 05 | [xds-discovery](05-xds-discovery/) | The locator as xDS server; a **Go** client with a direct and an `xds:///` channel side by side: discovery, round robin, scripted failover (`Events`) | none (Go only, by design) | [:3005](http://localhost:3005) | ✅ |
+| 06 | [tls](06-tls/) | One-way TLS from a **Go** client: certificates made at startup, `ssl-enabled-components=grpc`, direct TLS and xDS over TLS (locator-advertised), `openssl s_client` | none (Go only, by design) | [:3006](http://localhost:3006) | ✅ |
 | 07 | mtls | Mutual TLS | Native mTLS | :3007 | planned |
 | 08 | token-auth-rbac | Bearer tokens, `SecurityManager`, per-region `DATA:READ`/`WRITE` | `AuthInitialize` + same `SecurityManager` | :3008 | planned |
 | 09 | secure-xds | xDS + mTLS + tokens | SSL + auth | :3009 | planned |

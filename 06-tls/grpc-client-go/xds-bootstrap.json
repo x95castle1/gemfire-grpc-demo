@@ -1,0 +1,16 @@
+{
+  "xds_servers": [
+    {
+      "server_uri": "locator:50051",
+      "channel_creds": [{ "type": "tls", "config": { "ca_certificate_file": "/certs/ca.pem" } }],
+      "server_features": ["xds_v3"]
+    }
+  ],
+  "certificate_providers": {
+    "system_root_certs": {
+      "plugin_name": "file_watcher",
+      "config": { "ca_certificate_file": "/certs/ca.pem" }
+    }
+  },
+  "node": { "id": "grpc-client-go", "cluster": "gemfire" }
+}

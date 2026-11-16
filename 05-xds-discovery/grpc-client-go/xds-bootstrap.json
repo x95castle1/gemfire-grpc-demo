@@ -1,0 +1,10 @@
+{
+  "xds_servers": [
+    {
+      "server_uri": "locator:50051",
+      "channel_creds": [{ "type": "insecure" }],
+      "server_features": ["xds_v3"]
+    }
+  ],
+  "node": { "id": "grpc-client-go", "cluster": "gemfire" }
+}

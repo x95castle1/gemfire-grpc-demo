@@ -21,6 +21,8 @@ gemfire-extensions/*
 
 # Generated certs / local overrides
 **/certs/generated/
+# Demo certificates made at startup (06-tls and later): keys, never commit
+**/certs/
 *.local.env
 
 # Load-test output (make select-load-test)

@@ -52,16 +52,29 @@ region, then it sends a random mix of five named OQL queries. Each query is tagg
 |---|---|---|
 | `query/steady` | constant arrival rate · `scan`, `range`, `count`, `top`, `key` · 100 req/s · 1 m | parallel (one client) |
 
+### People script (04-structured-values)
+
+04 has one client (grpc-go) and one script. Its setup loads 10,000 `Person` messages (as
+`google.protobuf.Any`) into the `people` region. It then mixes single-entry calls with OQL
+queries into the messages' fields. The queries go through `lib/query.js`, so their rows count in
+`query_rows` too.
+
+| Script | Load | Run |
+|---|---|---|
+| `people/steady` | constant arrival rate · `get` 50%, `put` 20%, `by-city` 15%, `age-range` 10%, `nickname` 5% · 100 req/s · 1 m | parallel (one client) |
+
 ## Layout
 
 ```
 load-testing/
 ├── lib/crud.js        # /crud helpers (01): op mix, calls, preload, options, gemfire_call_duration trend
 ├── lib/bulk.js        # /bulk helpers (02): bulk calls, the bulk_entries counter, modes, per-VU key ranges
-├── lib/query.js       # /query helpers (03): named OQL calls, the query_rows counter, loading the data
+├── lib/query.js       # /query helpers (03, 04): named OQL calls, the query_rows counter, loading the data
+├── lib/people.js      # /people helpers (04): Get/Put of Person messages, loading the data
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
+├── scripts/people/    # 04: steady
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

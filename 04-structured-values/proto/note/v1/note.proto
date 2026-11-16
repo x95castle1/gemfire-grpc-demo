@@ -1,0 +1,11 @@
+// A second message type that is deliberately NOT in the descriptor JAR (see gemfire/Dockerfile).
+// The demo stores Notes to show what the server can and can't do with a type it doesn't know.
+syntax = "proto3";
+
+package note.v1;
+
+option go_package = "grpc-client-go/gen/notev1";
+
+message Note {
+  string text = 1;
+}

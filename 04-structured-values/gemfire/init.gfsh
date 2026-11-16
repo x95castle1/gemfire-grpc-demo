@@ -1,0 +1,18 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy.
+connect --locator=locator[10334]
+
+# people: the data the load tests use (POST /people/load). demo-grpc-go: the demo's people.
+# demo-notes: Note messages, a type whose descriptor is deliberately NOT deployed.
+create region --name=people --type=PARTITION --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION --if-not-exists
+create region --name=demo-notes --type=PARTITION --if-not-exists
+
+# Register person.v1.* with every server, so OQL can query into Person fields. Deploying the same
+# JAR name again replaces it (types added or removed); undeploy removes its types.
+deploy --jar=/descriptors/person-types.jar
+list deployed
+list protobuf-types
+
+# Show that the gRPC extension is loaded on every member.
+describe member --name=server1 --extensions
+list regions

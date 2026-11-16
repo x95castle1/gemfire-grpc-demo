@@ -63,9 +63,9 @@ queries into the messages' fields. The queries go through `lib/query.js`, so the
 |---|---|---|
 | `people/steady` | constant arrival rate · `get` 50%, `put` 20%, `by-city` 15%, `age-range` 10%, `nickname` 5% · 100 req/s · 1 m | parallel (one client) |
 
-### xDS scripts (05-xds-discovery, 06-tls)
+### xDS scripts (05-xds-discovery, 06-tls, 07-mtls)
 
-05's and 06's Go clients reach the cluster over two channels (in 06 both are TLS), `direct` (`dns:///server1:50051`) and
+05–07's Go clients reach the cluster over two channels (TLS in 06, mutual TLS in 07), `direct` (`dns:///server1:50051`) and
 `xds` (`xds:///gemfire_grpc`). Both scripts run one scenario per channel at the same time, with
 80% Get and 20% Put. The traffic is light on purpose: these scripts are there to show on the
 dashboard which server answers each call, not to measure speed. They break the results down by
@@ -89,7 +89,7 @@ load-testing/
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
 ├── scripts/people/    # 04: steady
-├── scripts/xds/       # 05, 06: balance · failover
+├── scripts/xds/       # 05–07: balance · failover
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

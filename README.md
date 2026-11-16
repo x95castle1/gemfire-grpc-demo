@@ -28,7 +28,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 | 04 | [structured-values](04-structured-values/) | `google.protobuf.Any` values from a **Go** client, descriptor JAR deploy (`list protobuf-types`), OQL into nested, repeated and enum fields, NULL vs UNDEFINED, unregistered types | none (Go only, by design) | [:3004](http://localhost:3004) | ✅ |
 | 05 | [xds-discovery](05-xds-discovery/) | The locator as xDS server; a **Go** client with a direct and an `xds:///` channel side by side: discovery, round robin, scripted failover (`Events`) | none (Go only, by design) | [:3005](http://localhost:3005) | ✅ |
 | 06 | [tls](06-tls/) | One-way TLS from a **Go** client: certificates made at startup, `ssl-enabled-components=grpc`, direct TLS and xDS over TLS (locator-advertised), `openssl s_client` | none (Go only, by design) | [:3006](http://localhost:3006) | ✅ |
-| 07 | mtls | Mutual TLS | Native mTLS | :3007 | planned |
+| 07 | [mtls](07-mtls/) | Mutual TLS from a **Go** client: client certificates (openssl), truststore + `ssl-require-authentication`, direct and xDS over mTLS (fallback credentials + authority) | none (Go only, by design) | [:3007](http://localhost:3007) | ✅ |
 | 08 | token-auth-rbac | Bearer tokens, `SecurityManager`, per-region `DATA:READ`/`WRITE` | `AuthInitialize` + same `SecurityManager` | :3008 | planned |
 | 09 | secure-xds | xDS + mTLS + tokens | SSL + auth | :3009 | planned |
 | 10 | error-handling | Every gRPC status code, retries, deadlines | Native exceptions | :3010 | planned |

@@ -538,24 +538,45 @@ breakdownTable() {
 # The same for request scripts (not bulk/*): calls, failed share and GemFire call p50/p99 per tag
 # value, which all ran at the same time, plus "v vs first value" rows.
 requestBreakdownTable() {
-  local tag=${breakdown%%=*} values i c f line calls failed g50 g99
+  local tag=${breakdown%%=*} values i c f line calls failed g50 g99 s401 s403 codes=0
   IFS=',' read -r -a values <<< "${breakdown#*=}"
+  # Scripts whose 401/403 answers are expected (08's auth/mixed) track them per tag value with
+  # thresholds on http_reqs{tag:v,status:401|403}; then the table shows them as columns too.
+  for c in "${targets[@]}"; do
+    ranOk "$c" && jq -e --arg k "http_reqs{${tag}:${values[0]},status:403}" '.metrics | has($k)' "$results/${c}.json" >/dev/null 2>&1 && codes=1
+  done
   echo
-  echo "By ${tag}: rows compare each ${tag} with ${values[0]} (all ran at the same time)"
-  printf '%s │ %8s %8s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS FAILED 'GF p50' 'p99'
-  printf '%s │ %8s %8s │ %11s %11s\n' "$(label '' 36)" '' '' '(ms)' '(ms)'
+  if [ $codes -eq 1 ]; then
+    echo "By ${tag}: what each one got back (401 = UNAUTHENTICATED, 403 = PERMISSION_DENIED; both expected here)"
+  else
+    echo "By ${tag}: rows compare each ${tag} with ${values[0]} (all ran at the same time)"
+  fi
+  if [ $codes -eq 1 ]; then
+    printf '%s │ %8s %8s %8s %8s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS 'OK' '401' '403' 'GF p50' 'p99'
+    printf '%s │ %8s %8s %8s %8s │ %11s %11s\n' "$(label '' 36)" '' '' 'unauth' 'denied' '(ms)' '(ms)'
+  else
+    printf '%s │ %8s %8s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS FAILED 'GF p50' 'p99'
+    printf '%s │ %8s %8s │ %11s %11s\n' "$(label '' 36)" '' '' '(ms)' '(ms)'
+  fi
   for c in "${targets[@]}"; do
     ranOk "$c" || continue
     f="$results/${c}.json"
     for i in "${!values[@]}"; do
       line=$(jq -r --arg t "${tag}:${values[$i]}" '.metrics as $m | [
           ($m["http_reqs{" + $t + "}"].count // 0), (($m["http_req_failed{" + $t + "}"].value // 0) * 100),
-          ($m["gemfire_call_duration{" + $t + "}"].med // 0), ($m["gemfire_call_duration{" + $t + "}"]["p(99)"] // 0)
+          ($m["gemfire_call_duration{" + $t + "}"].med // 0), ($m["gemfire_call_duration{" + $t + "}"]["p(99)"] // 0),
+          ($m["http_reqs{" + $t + ",status:401}"].count // 0), ($m["http_reqs{" + $t + ",status:403}"].count // 0)
         ] | map(tostring) | join(" ")' "$f")
       kvSet "rb${i}" "$c" "$line"
-      read -r calls failed g50 g99 <<< "$line"
-      printf '%s │ %8s %7.2f%% │ %11.3f %11.3f\n' "$(label "${c} · ${values[$i]}" 36)" "$calls" "$failed" "$g50" "$g99"
+      read -r calls failed g50 g99 s401 s403 <<< "$line"
+      if [ $codes -eq 1 ]; then
+        printf '%s │ %8s %8s %8s %8s │ %11.3f %11.3f\n' "$(label "${c} · ${values[$i]}" 36)" "$calls" \
+          "$((calls - s401 - s403))" "$s401" "$s403" "$g50" "$g99"
+      else
+        printf '%s │ %8s %7.2f%% │ %11.3f %11.3f\n' "$(label "${c} · ${values[$i]}" 36)" "$calls" "$failed" "$g50" "$g99"
+      fi
     done
+    [ $codes -eq 1 ] && continue   # who got in is the point there; latency ratios between users aren't
     for i in "${!values[@]}"; do
       [ "$i" -eq 0 ] && continue
       local a b

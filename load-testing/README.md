@@ -76,6 +76,18 @@ dashboard which server answers each call, not to measure speed. They break the r
 | `xds/balance` | both channels · 20 req/s each · 1 m | parallel (one client) |
 | `xds/failover` | both channels · 20 req/s each · 2 m · `Events: 40s stop server1, 80s start server1` · failures allowed | parallel (one client) |
 
+### Auth script (08-token-auth-rbac)
+
+08's Go client acts as different users (`?user=`), each with its own JWT. `auth/mixed` sends random
+users doing Gets and Puts on two regions. 401 (UNAUTHENTICATED) and 403 (PERMISSION_DENIED) are the
+point of the test, so `http.expectedStatuses(200, 401, 403)` keeps them out of `http_req_failed`. Its
+`Breakdown: user=…` table shows OK / 401 / 403 per user: the script tracks
+`http_reqs{user:x,status:401|403}`, and `load.sh` adds those columns whenever they're present.
+
+| Script | Load | Run |
+|---|---|---|
+| `auth/mixed` | alice, bob, carol, none × Get 70% / Put 30% × orders, customers · 20 req/s · 1 m | parallel (one client) |
+
 ## Layout
 
 ```
@@ -85,11 +97,13 @@ load-testing/
 ├── lib/query.js       # /query helpers (03, 04): named OQL calls, the query_rows counter, loading the data
 ├── lib/people.js      # /people helpers (04): Get/Put of Person messages, loading the data
 ├── lib/xds.js         # /crud calls with ?via=direct|xds (05): one scenario per channel
+├── lib/auth.js        # /crud calls as alice, bob, carol or nobody (08); 401/403 are expected answers
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
 ├── scripts/people/    # 04: steady
 ├── scripts/xds/       # 05–07: balance · failover
+├── scripts/auth/      # 08: mixed
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

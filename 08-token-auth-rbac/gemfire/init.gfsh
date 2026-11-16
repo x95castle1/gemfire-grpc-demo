@@ -1,0 +1,10 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy. With a
+# SecurityManager on, gfsh logs in too: admin may do everything (see gfsecurity.properties).
+connect --locator=locator[10334] --user=admin --password=admin-secret
+
+# Two regions, so permissions can differ per region (carol may only touch orders).
+create region --name=orders --type=PARTITION --if-not-exists
+create region --name=customers --type=PARTITION --if-not-exists
+
+describe member --name=server1 --extensions
+list regions

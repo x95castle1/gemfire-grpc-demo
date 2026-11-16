@@ -24,7 +24,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 |---|---|---|---|---|---|
 | 01 | [crud-basics](01-crud-basics/) | All 13 unary RPCs from Java **and Go**; string/int32/int64 keys; every scalar `Value` type; direct `dns:///` connection | Region API (`put`, `putIfAbsent`, `replace`, `containsKeyOnServer`, `sizeOnServer`…) | [:3001](http://localhost:3001) | ✅ |
 | 02 | [bulk-streaming](02-bulk-streaming/) | `PutStream`, `GetStream`, `RemoveStream`, `KeySetStream`; chunking, flow control, non-transactional failure; vs. one unary call per entry | `putAll`, `getAll`, `removeAll`, `keySetOnServer` (vs. `put`/`get`/`remove` per entry) | [:3002](http://localhost:3002) | ✅ |
-| 03 | oql-query | `Query`: parameters, `field_names`, batching, NULL/UNDEFINED | `QueryService` | :3003 | planned |
+| 03 | [oql-query](03-oql-query/) | `Query` from a **Go** client: parameters, `field_names`, aggregates, ORDER BY/LIMIT, batching, UNDEFINED, errors | none (Go only, by design) | [:3003](http://localhost:3003) | ✅ |
 | 04 | structured-values | `google.protobuf.Any`, descriptor JAR deploy, OQL into fields; Go writes and Java reads | PDX | :3004 | planned |
 | 05 | xds-discovery | Locator xDS, round-robin, failover (Java + Go) | Locator pool, single-hop | :3005 | planned |
 | 06 | tls | One-way TLS | Native SSL | :3006 | planned |

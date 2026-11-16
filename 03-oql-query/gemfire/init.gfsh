@@ -1,0 +1,12 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy.
+connect --locator=locator[10334]
+
+# The data the load tests query (filled by POST /query/load), and the demo's own region.
+create region --name=query --type=PARTITION --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION --if-not-exists
+
+# Show that the gRPC extension is loaded on every member.
+describe member --name=locator --extensions
+describe member --name=server1 --extensions
+describe member --name=server2 --extensions
+list regions

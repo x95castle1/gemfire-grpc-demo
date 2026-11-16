@@ -41,14 +41,27 @@ throwaway container on the example's Docker network: one k6 process per client, 
 
 Without a terminal (CI, scripts), k6 runs quietly and only the comparison table is printed.
 
+### Query script (03-oql-query)
+
+03 has one client (grpc-go) and one script. Its setup loads 10,000 entries into the `query`
+region, then it sends a random mix of five named OQL queries. Each query is tagged with its name
+(`op`), which the 03 dashboard's "query" dropdown filters on. Rows returned are counted in
+`query_rows`.
+
+| Script | Load | Run |
+|---|---|---|
+| `query/steady` | constant arrival rate · `scan`, `range`, `count`, `top`, `key` · 100 req/s · 1 m | parallel (one client) |
+
 ## Layout
 
 ```
 load-testing/
 ├── lib/crud.js        # /crud helpers (01): op mix, calls, preload, options, gemfire_call_duration trend
 ├── lib/bulk.js        # /bulk helpers (02): bulk calls, the bulk_entries counter, modes, per-VU key ranges
+├── lib/query.js       # /query helpers (03): named OQL calls, the query_rows counter, loading the data
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
+├── scripts/query/     # 03: steady
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

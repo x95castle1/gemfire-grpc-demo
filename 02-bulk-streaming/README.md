@@ -235,8 +235,8 @@ FINDINGS_PLACEHOLDER
 ├── gemfire/
 │   ├── start-member.sh       # starts a locator/server with the gRPC extension and bulk-batch-size
 │   └── init.gfsh             # creates bulk-grpc, bulk-native, demo-grpc, demo-native
-├── grpc-client-java/         # Application (Spring Boot), Api, GrpcBulk, StreamCall, Demo, Metrics, RpcMetrics (interceptor)
-├── native-client-java/       # Application (Spring Boot), Api, NativeBulk, Demo, Metrics
+├── grpc-client-java/         # GrpcClientApplication, BulkController, Bulk, GrpcBulk, StreamCall, RpcMetricsInterceptor, Demo, DemoRunner, DemoMetrics, Settings
+├── native-client-java/       # NativeClientApplication, BulkController, Bulk, NativeBulk, Demo, DemoRunner, DemoMetrics, Settings
 └── monitoring/
     ├── prometheus.yml
     └── grafana/
@@ -245,7 +245,7 @@ FINDINGS_PLACEHOLDER
         └── provisioning/
 ```
 
-`Api.java`, `Metrics.java`, `Checks.java` and `Config.java` are identical in both clients.
+`BulkController.java`, `Bulk.java`, `DemoRunner.java`, `DemoMetrics.java`, `Settings.java` and `Checks.java` are identical in both clients.
 
 Metrics, the same names as 01 plus two:
 

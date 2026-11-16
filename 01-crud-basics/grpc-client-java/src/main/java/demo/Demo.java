@@ -34,7 +34,7 @@ final class Demo {
   private final String region;
   private final Checks c;
 
-  Demo(GemFireBlockingStub gemfire, Config cfg, Checks checks) {
+  Demo(GemFireBlockingStub gemfire, Settings cfg, Checks checks) {
     this.gemfire = gemfire;
     this.region = cfg.demoRegion();
     this.c = checks;

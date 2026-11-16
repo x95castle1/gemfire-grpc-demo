@@ -9,12 +9,12 @@ final class Checks {
   record Report(int passed, int failed, String text) {}
 
   private final String client;
-  private final Metrics metrics;
+  private final DemoMetrics metrics;
   private final StringBuilder text = new StringBuilder();
   private int passed;
   private int failed;
 
-  Checks(String client, Metrics metrics) {
+  Checks(String client, DemoMetrics metrics) {
     this.client = client;
     this.metrics = metrics;
   }

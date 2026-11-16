@@ -21,9 +21,9 @@ final class Demo {
   private final ClientCache cache;
   private final Region<Object, Object> region;
   private final Checks c;
-  private final Config cfg;
+  private final Settings cfg;
 
-  Demo(ClientCache cache, Config cfg, Checks checks) {
+  Demo(ClientCache cache, Settings cfg, Checks checks) {
     this.cache = cache;
     this.cfg = cfg;
     this.region = proxyRegion(cache, cfg.demoRegion());
@@ -125,7 +125,7 @@ final class Demo {
 
     c.section("11. Why stream? The same 2,000 entries without streaming");
     try {
-      Api.Bulk bulk = new NativeBulk(cache, cfg.withRegion(region.getName()));
+      Bulk bulk = new NativeBulk(cache, cfg.withRegion(region.getName()));
       double one = millis(() -> bulk.unaryPut(0, 2_000, 1024, 1));
       bulk.reset();
       double sixteen = millis(() -> bulk.unaryPut(0, 2_000, 1024, 16));

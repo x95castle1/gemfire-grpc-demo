@@ -11,36 +11,45 @@ import java.io.OutputStream;
 import org.springframework.stereotype.Component;
 
 /**
- * In-app metrics, served at /metrics by {@link Api}. Names and labels are identical in every
+ * In-app metrics, served at /metrics by {@link BulkController}. Names and labels are identical in every
  * client of every example so the Grafana dashboards compare them directly.
  *
  * <ul>
- *   <li>{@code demo_op_latency_seconds{client,example,region,op,code}} times one /crud operation's
- *       GemFire work (a gRPC RPC, or the Region API call(s) that do the same job), not the HTTP
+ *   <li>{@code demo_op_latency_seconds{client,example,region,op,code}} times one /bulk call's
+ *       GemFire work (one gRPC stream, or the Region API calls that do the same job; in unary
+ *       mode, all of the per-entry calls together, with op = Put/Get/Remove), not the HTTP
  *       request around it. Failures are timed too, with the gRPC status code or exception class as
  *       {@code code} ("OK" on success). k6 measures the end-to-end request separately.
+ *   <li>{@code demo_entries_total{client,example,region,op}} counts the entries those calls moved
+ *       (for GetStream, the entries found), so entries/s compares the two clients' throughput.
  *   <li>{@code demo_rpc_duration_seconds{client,example,region,method,code}} times every gRPC call
- *       the client makes, streaming ones and the demo's included. It's recorded by a gRPC client
- *       interceptor, so the native client never has any.
+ *       the client makes, the demo's included. It's recorded by a gRPC client interceptor, so the
+ *       native client never has any.
+ *   <li>{@code demo_stream_messages_total{client,example,method,direction}} counts the messages
+ *       the gRPC client sent and received on each kind of call (also from the interceptor).
  * </ul>
  */
 @Component
-final class Metrics {
+final class DemoMetrics {
 
-  /** 50µs .. 2.5s: fine-grained at the low end where unary cache ops live. */
+  /**
+   * 50µs .. 60s: the same fine-grained low end as 01, plus the seconds a large bulk call can take.
+   */
   private static final double[] LATENCY_BUCKETS = {
     0.00005, 0.0001, 0.00015, 0.0002, 0.0003, 0.0004, 0.0005, 0.00075, 0.001, 0.0015, 0.002,
-    0.003, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5
+    0.003, 0.005, 0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5, 10, 30, 60
   };
 
   private final String client;
   private final String example;
   private final String region;
   private final Histogram latency;
+  private final Counter entries;
   private final Histogram rpcs;
+  private final Counter messages;
   private final Counter checks;
 
-  Metrics(Config cfg) {
+  DemoMetrics(Settings cfg) {
     this.client = cfg.client();
     this.example = cfg.example();
     this.region = cfg.region();
@@ -48,10 +57,16 @@ final class Metrics {
     latency =
         Histogram.builder()
             .name("demo_op_latency_seconds")
-            .help("Latency of one /crud operation's GemFire work, by result code (excludes HTTP)")
+            .help("Latency of one /bulk call's GemFire work, by result code (excludes HTTP)")
             .labelNames("client", "example", "region", "op", "code")
             .classicUpperBounds(LATENCY_BUCKETS)
             .classicOnly()
+            .register();
+    entries =
+        Counter.builder()
+            .name("demo_entries")
+            .help("Entries moved by /bulk calls (GetStream: entries found)")
+            .labelNames("client", "example", "region", "op")
             .register();
     rpcs =
         Histogram.builder()
@@ -60,6 +75,12 @@ final class Metrics {
             .labelNames("client", "example", "region", "method", "code")
             .classicUpperBounds(LATENCY_BUCKETS)
             .classicOnly()
+            .register();
+    messages =
+        Counter.builder()
+            .name("demo_stream_messages")
+            .help("gRPC messages the client sent and received, by method")
+            .labelNames("client", "example", "method", "direction")
             .register();
     checks =
         Counter.builder()
@@ -70,7 +91,10 @@ final class Metrics {
     // Pre-create the series so the dashboard shows 0 instead of "no data". For counters and
     // histograms this also matters for increase(): Prometheus can't see a series' first
     // observation, so a series that first appears already at 1 would count as 0.
-    for (String op : Api.OPS.values()) latency.labelValues(client, example, region, op, "OK");
+    for (String op : Bulk.allOps()) {
+      latency.labelValues(client, example, region, op, "OK");
+      entries.labelValues(client, example, region, op);
+    }
     checks.labelValues(client, example, "pass");
     checks.labelValues(client, example, "fail");
   }
@@ -87,15 +111,22 @@ final class Metrics {
     return writer.getContentType();
   }
 
-  /** One /crud operation: code is "OK", a gRPC status code, or an exception class name. */
+  /** One /bulk call: code is "OK", a gRPC status code, or an exception class name. */
   void recordOp(String op, String code, long nanos) {
     latency.labelValues(client, example, region, op, code).observe(nanos / 1e9);
+  }
+
+  /** Entries one successful /bulk call moved. */
+  void recordEntries(String op, long n) {
+    entries.labelValues(client, example, region, op).inc(n);
   }
 
   /** Pre-creates the OK series of every gRPC method in these regions (see the constructor). */
   void initRpcs(Iterable<String> methods, String... regions) {
     for (String method : methods) {
       for (String r : regions) rpcs.labelValues(client, example, r, method, "OK");
+      messages.labelValues(client, example, method, "sent");
+      messages.labelValues(client, example, method, "received");
     }
   }
 
@@ -104,6 +135,10 @@ final class Metrics {
     rpcs.labelValues(client, example, rpcRegion, method, code).observe(nanos / 1e9);
   }
 
+  /** One gRPC message sent or received (direction "sent" | "received"). */
+  void recordMessage(String method, String direction) {
+    messages.labelValues(client, example, method, direction).inc();
+  }
 
   void recordCheck(boolean passed) {
     checks.labelValues(client, example, passed ? "pass" : "fail").inc();

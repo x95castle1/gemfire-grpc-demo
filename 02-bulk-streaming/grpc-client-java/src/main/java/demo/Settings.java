@@ -4,7 +4,7 @@ package demo;
  * Demo settings, read from environment variables (see ../.env and docker-compose.yml). The HTTP
  * server's PORT and HTTP_THREADS are Spring Boot properties (application.properties).
  */
-record Config(
+record Settings(
     String client,
     String example,
     String region,
@@ -13,9 +13,9 @@ record Config(
     int payloadBytes,
     boolean demoOnStart) {
 
-  static Config fromEnv(String client) {
+  static Settings fromEnv(String client) {
     String shortName = client.replace("-java", "");
-    return new Config(
+    return new Settings(
         client,
         env("EXAMPLE", "02-bulk-streaming"),
         env("REGION", "bulk-" + shortName),
@@ -26,8 +26,8 @@ record Config(
   }
 
   /** The same settings for another region (the demos reuse the bulk code on their own region). */
-  Config withRegion(String name) {
-    return new Config(client, example, name, demoRegion, keyPrefix, payloadBytes, demoOnStart);
+  Settings withRegion(String name) {
+    return new Settings(client, example, name, demoRegion, keyPrefix, payloadBytes, demoOnStart);
   }
 
   static String env(String name, String def) {

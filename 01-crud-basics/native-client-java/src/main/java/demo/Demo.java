@@ -20,7 +20,7 @@ final class Demo {
   private final Region<Object, Object> region;
   private final Checks c;
 
-  Demo(ClientCache cache, Config cfg, Checks checks) {
+  Demo(ClientCache cache, Settings cfg, Checks checks) {
     this.cache = cache;
     this.region = proxyRegion(cache, cfg.demoRegion());
     this.c = checks;

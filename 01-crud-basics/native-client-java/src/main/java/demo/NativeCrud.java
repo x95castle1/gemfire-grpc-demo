@@ -12,14 +12,14 @@ import org.apache.geode.cache.client.ClientRegionShortcut;
  * The 13 operations over the native client, for the HTTP API. Each op uses the cheapest native
  * code that returns the same information as the gRPC RPC of the same name (README mapping table).
  */
-final class NativeCrud implements Api.Crud {
+final class NativeCrud implements Crud {
 
   private final Region<String, byte[]> region;
-  private final Config cfg;
+  private final Settings cfg;
   /** One payload per size, so ReplaceIf/RemoveIf succeed whenever the key exists. */
   private final Map<Integer, byte[]> payloads = new ConcurrentHashMap<>();
 
-  NativeCrud(ClientCache cache, Config cfg) {
+  NativeCrud(ClientCache cache, Settings cfg) {
     this.region = cache.<String, byte[]>createClientRegionFactory(ClientRegionShortcut.PROXY).create(cfg.region());
     this.cfg = cfg;
   }

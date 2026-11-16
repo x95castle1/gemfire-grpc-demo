@@ -39,13 +39,13 @@ final class Demo {
   private final String region;
   private final int bulkBatchSize;
   private final Checks c;
-  private final Config cfg;
+  private final Settings cfg;
 
-  Demo(Channel channel, Config cfg, Checks checks) {
+  Demo(Channel channel, Settings cfg, Checks checks) {
     this.channel = channel;
     this.cfg = cfg;
     this.region = cfg.demoRegion();
-    this.bulkBatchSize = Integer.parseInt(Config.env("GRPC_BULK_BATCH_SIZE", "1000"));
+    this.bulkBatchSize = Integer.parseInt(Settings.env("GRPC_BULK_BATCH_SIZE", "1000"));
     this.c = checks;
   }
 
@@ -158,7 +158,7 @@ final class Demo {
 
     c.section("11. Why stream? The same 2,000 entries without streaming");
     try {
-      Api.Bulk bulk = new GrpcBulk(channel, cfg.withRegion(region));
+      Bulk bulk = new GrpcBulk(channel, cfg.withRegion(region));
       double one = millis(() -> bulk.unaryPut(0, 2_000, 1024, 1));
       bulk.reset();
       double sixteen = millis(() -> bulk.unaryPut(0, 2_000, 1024, 16));

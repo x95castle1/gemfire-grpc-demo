@@ -23,23 +23,23 @@ import org.apache.geode.cache.client.ClientRegionShortcut;
  * chunk by bucket and sends each server its share), so chunk N+1 waits for chunk N. The gRPC
  * client sends its chunks back to back on one stream instead.
  */
-final class NativeBulk implements Api.Bulk {
+final class NativeBulk implements Bulk {
 
   private final Region<String, byte[]> region;
-  private final Config cfg;
+  private final Settings cfg;
   /** One payload per size: every write of a given size uses the same bytes. */
   private final Map<Integer, byte[]> payloads = new ConcurrentHashMap<>();
   /**
    * Threads for mode=unary with inflight > 1. The Region API is blocking, so N calls in flight
    * take N threads (the gRPC client gets the same concurrency from async calls on one channel).
    */
-  private final ExecutorService unaryPool = Executors.newFixedThreadPool(Api.MAX_INFLIGHT, r -> {
+  private final ExecutorService unaryPool = Executors.newFixedThreadPool(Bulk.MAX_INFLIGHT, r -> {
     Thread t = new Thread(r, "unary");
     t.setDaemon(true);
     return t;
   });
 
-  NativeBulk(ClientCache cache, Config cfg) {
+  NativeBulk(ClientCache cache, Settings cfg) {
     Region<String, byte[]> existing = cache.getRegion(cfg.region());   // the demo's, if it made it first
     this.region = existing != null ? existing
         : cache.<String, byte[]>createClientRegionFactory(ClientRegionShortcut.PROXY).create(cfg.region());
@@ -47,9 +47,9 @@ final class NativeBulk implements Api.Bulk {
   }
 
   @Override
-  public Api.Result put(int start, int count, int batch, int size) {
+  public Bulk.Result put(int start, int count, int batch, int size) {
     byte[] v = payload(size);
-    int chunk = Api.chunk(batch, size);
+    int chunk = Bulk.chunk(batch, size);
     Map<String, byte[]> map = new HashMap<>();
     long calls = 0;
     for (int i = start; i < start + count; i++) {
@@ -64,11 +64,11 @@ final class NativeBulk implements Api.Bulk {
       region.putAll(map);
       calls++;
     }
-    return new Api.Result(count, calls);
+    return new Bulk.Result(count, calls);
   }
 
   @Override
-  public Api.Result get(int start, int count, int batch) {
+  public Bulk.Result get(int start, int count, int batch) {
     long found = 0;
     long calls = 0;
     List<String> keys = new ArrayList<>(batch);
@@ -81,29 +81,29 @@ final class NativeBulk implements Api.Bulk {
         keys = new ArrayList<>(batch);
       }
     }
-    return new Api.Result(found, calls);
+    return new Bulk.Result(found, calls);
   }
 
   @Override
-  public Api.Result remove(int start, int count, int batch) {
+  public Bulk.Result remove(int start, int count, int batch) {
     List<String> keys = new ArrayList<>(count);
     for (int i = start; i < start + count; i++) keys.add(cfg.keyPrefix() + i);
     return removeKeys(keys, batch);
   }
 
-  private Api.Result removeKeys(List<String> keys, int batch) {
+  private Bulk.Result removeKeys(List<String> keys, int batch) {
     long calls = 0;
     for (int i = 0; i < keys.size(); i += batch) {
       region.removeAll(keys.subList(i, Math.min(keys.size(), i + batch)));
       calls++;
     }
-    return new Api.Result(keys.size(), calls);
+    return new Bulk.Result(keys.size(), calls);
   }
 
   // --- mode=unary: the same work without bulk calls, one Region call per entry -----------------
 
   @Override
-  public Api.Result unaryPut(int start, int count, int size, int inflight) throws Exception {
+  public Bulk.Result unaryPut(int start, int count, int size, int inflight) throws Exception {
     byte[] v = payload(size);
     return unary(start, count, inflight, i -> {
       region.put(cfg.keyPrefix() + i, v);
@@ -112,12 +112,12 @@ final class NativeBulk implements Api.Bulk {
   }
 
   @Override
-  public Api.Result unaryGet(int start, int count, int inflight) throws Exception {
+  public Bulk.Result unaryGet(int start, int count, int inflight) throws Exception {
     return unary(start, count, inflight, i -> region.get(cfg.keyPrefix() + i) != null);
   }
 
   @Override
-  public Api.Result unaryRemove(int start, int count, int inflight) throws Exception {
+  public Bulk.Result unaryRemove(int start, int count, int inflight) throws Exception {
     // remove() on a client region returns null, not the old value; the count is of calls made.
     return unary(start, count, inflight, i -> {
       region.remove(cfg.keyPrefix() + i);
@@ -130,11 +130,11 @@ final class NativeBulk implements Api.Bulk {
    * 1, otherwise on {@link #unaryPool}. {@code call} returns whether the entry counts (Get: found).
    * Stops at the first failure and throws it.
    */
-  private Api.Result unary(int start, int count, int inflight, IntPredicate call) throws Exception {
+  private Bulk.Result unary(int start, int count, int inflight, IntPredicate call) throws Exception {
     if (inflight == 1) {
       long hits = 0;
       for (int i = start; i < start + count; i++) if (call.test(i)) hits++;
-      return new Api.Result(hits, count);
+      return new Bulk.Result(hits, count);
     }
     Semaphore permits = new Semaphore(inflight);
     AtomicLong hits = new AtomicLong();
@@ -156,15 +156,15 @@ final class NativeBulk implements Api.Bulk {
     }
     permits.acquire(inflight);   // wait for the last ones
     if (failure.get() != null) throw failure.get();
-    return new Api.Result(hits.get(), calls);
+    return new Bulk.Result(hits.get(), calls);
   }
 
   // --- keySetOnServer ----------------------------------------------------------------------------
 
   @Override
-  public Api.Result keySet() {
+  public Bulk.Result keySet() {
     // One request; the whole key set comes back as one response, held in client memory.
-    return new Api.Result(region.keySetOnServer().size(), 1);
+    return new Bulk.Result(region.keySetOnServer().size(), 1);
   }
 
   @Override

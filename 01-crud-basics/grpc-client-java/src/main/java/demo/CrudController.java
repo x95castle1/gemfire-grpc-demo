@@ -2,14 +2,8 @@ package demo;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.boot.ApplicationArguments;
-import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.availability.ApplicationAvailability;
 import org.springframework.boot.availability.ReadinessState;
 import org.springframework.http.MediaType;
@@ -27,8 +21,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /**
  * The HTTP API that load tests (k6) and humans call. Identical in every Java client. Only the
- * {@link Crud} bean differs (gRPC vs native), and it's wired up in each client's
- * {@code Application}.
+ * {@link Crud} bean behind it differs (gRPC vs native).
  *
  * <pre>
  *   GET  /                          endpoint list
@@ -45,62 +38,17 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
  * alone. k6 records it next to its own end-to-end timing.
  */
 @RestController
-class Api implements ApplicationRunner {
+class CrudController {
 
-  /** One client's implementation of the 13 unary operations. */
-  interface Crud {
-    /**
-     * Runs one operation on {@code key} with a {@code payloadBytes} value (for writes) and
-     * returns its result: value size in bytes (or null when absent), a boolean, or a count.
-     */
-    Object execute(String op, String key, int payloadBytes) throws Exception;
-
-    /** Writes keys 0..count-1 with a bulk API. Returns the number written. */
-    int preload(int count, int payloadBytes) throws Exception;
-
-    /** Maps a failure to a short label: a gRPC status code or an exception class name. */
-    String errorCode(Throwable t);
-  }
-
-  /** URL segment → RPC name (used as the `op` metric label in every client). */
-  static final Map<String, String> OPS = new LinkedHashMap<>();
-
-  /** RPC name → JSON field name of its result (absent for Put). */
-  static final Map<String, String> RESULT_FIELD = new HashMap<>();
-
-  static {
-    op("get", "Get", "valueBytes");
-    op("put", "Put", null);
-    op("get-and-put", "GetAndPut", "previousBytes");
-    op("remove", "Remove", "removed");
-    op("remove-if", "RemoveIf", "removed");
-    op("get-and-remove", "GetAndRemove", "removedBytes");
-    op("put-if-absent", "PutIfAbsent", "inserted");
-    op("put-if-absent-and-get", "PutIfAbsentAndGet", "valueBytes");
-    op("replace", "Replace", "replaced");
-    op("replace-if", "ReplaceIf", "replaced");
-    op("get-and-replace", "GetAndReplace", "previousBytes");
-    op("contains-key", "ContainsKey", "contains");
-    op("entry-count", "EntryCount", "size");
-  }
-
-  private static void op(String path, String rpc, String field) {
-    OPS.put(path, rpc);
-    if (field != null) RESULT_FIELD.put(rpc, field);
-  }
-
-  private static final int MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
   private static final MediaType TEXT = MediaType.parseMediaType("text/plain;charset=UTF-8");
-  private static final Logger log = LoggerFactory.getLogger(Api.class);
 
-  private final Config cfg;
-  private final Metrics metrics;
+  private final Settings cfg;
+  private final DemoMetrics metrics;
   private final Crud crud;
-  private final Supplier<Checks.Report> demo;
+  private final DemoRunner demo;
   private final ApplicationAvailability availability;
-  private volatile Checks.Report lastDemo;
 
-  Api(Config cfg, Metrics metrics, Crud crud, Supplier<Checks.Report> demo, ApplicationAvailability availability) {
+  CrudController(Settings cfg, DemoMetrics metrics, Crud crud, DemoRunner demo, ApplicationAvailability availability) {
     this.cfg = cfg;
     this.metrics = metrics;
     this.crud = crud;
@@ -108,33 +56,14 @@ class Api implements ApplicationRunner {
     this.availability = availability;
   }
 
-  /**
-   * Runs the startup demo. Spring Boot calls runners after Tomcat is listening but before it
-   * marks the app ready, so /health stays 503 (and Docker keeps the client "starting") until the
-   * demo is done.
-   */
-  @Override
-  public void run(ApplicationArguments args) {
-    log.info("{} ({}) serving region {}", cfg.client(), cfg.example(), cfg.region());
-    if (cfg.demoOnStart()) runDemo();
-  }
-
-  /** Runs the demo now and remembers the result for GET /demo. */
-  synchronized Checks.Report runDemo() {
-    lastDemo = demo.get();
-    return lastDemo;
-  }
-
-  // ---------------------------------------------------------------------------------------------
-
   @GetMapping("/")
   ResponseEntity<String> index() {
     StringBuilder sb = new StringBuilder();
     sb.append(cfg.client()).append(" (").append(cfg.example()).append(")\n\n");
     sb.append("GET  /health\nGET  /metrics\nGET  /demo\nPOST /demo\n");
     sb.append("POST /crud/preload?count=10000&size=").append(cfg.payloadBytes()).append('\n');
-    for (Map.Entry<String, String> e : OPS.entrySet()) {
-      boolean read = isRead(e.getValue());
+    for (Map.Entry<String, String> e : Crud.OPS.entrySet()) {
+      boolean read = Crud.isRead(e.getValue());
       sb.append(read ? "GET  " : "POST ").append("/crud/").append(e.getKey());
       sb.append(e.getValue().equals("EntryCount") ? "" : "?key=42").append('\n');
     }
@@ -156,7 +85,7 @@ class Api implements ApplicationRunner {
 
   @GetMapping("/demo")
   Map<String, Object> lastDemo() {
-    Checks.Report r = lastDemo;
+    Checks.Report r = demo.last();
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("ran", r != null);
     if (r != null) {
@@ -167,8 +96,8 @@ class Api implements ApplicationRunner {
   }
 
   @PostMapping("/demo")
-  ResponseEntity<String> demo() {
-    Checks.Report r = runDemo();
+  ResponseEntity<String> runDemo() {
+    Checks.Report r = demo.runDemo();
     return ResponseEntity.status(r.failed() == 0 ? 200 : 500).contentType(TEXT).body(r.text());
   }
 
@@ -192,7 +121,7 @@ class Api implements ApplicationRunner {
       @RequestParam(required = false) String key,
       @RequestParam(required = false) Integer size) {
     int bytes = size(size);
-    String op = OPS.get(segment);
+    String op = Crud.OPS.get(segment);
     Map<String, Object> body = new LinkedHashMap<>();
     if (op == null) {
       body.put("error", "unknown op: " + segment);
@@ -218,7 +147,7 @@ class Api implements ApplicationRunner {
 
     body.put("op", op);
     if (key != null) body.put("key", key);
-    String field = RESULT_FIELD.get(op);
+    String field = Crud.RESULT_FIELD.get(op);
     if (field != null) body.put(field, result);
     body.put("micros", nanos / 1000);
     return ResponseEntity.ok().header("X-GemFire-Micros", Long.toString(nanos / 1000)).body(body);
@@ -239,13 +168,9 @@ class Api implements ApplicationRunner {
     return ResponseEntity.status(500).body(Map.of("error", String.valueOf(e)));
   }
 
-  static boolean isRead(String op) {
-    return op.equals("Get") || op.equals("ContainsKey") || op.equals("EntryCount");
-  }
-
   private int size(Integer size) {
     int bytes = size == null ? cfg.payloadBytes() : size;
-    if (bytes < 0 || bytes > MAX_PAYLOAD_BYTES) throw new IllegalArgumentException("size must be 0.." + MAX_PAYLOAD_BYTES);
+    if (bytes < 0 || bytes > Crud.MAX_PAYLOAD_BYTES) throw new IllegalArgumentException("size must be 0.." + Crud.MAX_PAYLOAD_BYTES);
     return bytes;
   }
 }

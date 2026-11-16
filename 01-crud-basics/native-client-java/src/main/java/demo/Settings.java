@@ -4,7 +4,7 @@ package demo;
  * Demo settings, read from environment variables (see ../.env and docker-compose.yml). The HTTP
  * server's PORT and HTTP_THREADS are Spring Boot properties (application.properties).
  */
-record Config(
+record Settings(
     String client,
     String example,
     String region,
@@ -13,9 +13,9 @@ record Config(
     int payloadBytes,
     boolean demoOnStart) {
 
-  static Config fromEnv(String client) {
+  static Settings fromEnv(String client) {
     String shortName = client.replace("-java", "");
-    return new Config(
+    return new Settings(
         client,
         env("EXAMPLE", "01-crud-basics"),
         env("REGION", "crud"),

@@ -17,14 +17,14 @@ import io.grpc.Status;
  * {@code demo_rpc_duration_seconds}: unary and streaming alike, from start until the server
  * closes the call, labeled with the method, the region and the final status code.
  *
- * <p>This is the RPC-level view. {@code demo_op_latency_seconds} (recorded in {@link Api}) stays
+ * <p>This is the RPC-level view. {@code demo_op_latency_seconds} (recorded in {@link CrudController}) stays
  * the operation-level view that's compared with the native client, which has no interceptors.
  */
-final class RpcMetrics implements ClientInterceptor {
+final class RpcMetricsInterceptor implements ClientInterceptor {
 
-  private final Metrics metrics;
+  private final DemoMetrics metrics;
 
-  RpcMetrics(Metrics metrics) {
+  RpcMetricsInterceptor(DemoMetrics metrics) {
     this.metrics = metrics;
   }
 

@@ -32,11 +32,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /** The 13 unary operations over gRPC, for the HTTP API. */
-final class GrpcCrud implements Api.Crud {
+final class GrpcCrud implements Crud {
 
   private final ManagedChannel channel;
   private final GemFireBlockingStub stub;
-  private final Config cfg;
+  private final Settings cfg;
   private final String region;
   /**
    * One payload per size. Every write of a given size uses the same bytes, so ReplaceIf and
@@ -44,7 +44,7 @@ final class GrpcCrud implements Api.Crud {
    */
   private final Map<Integer, Value> payloads = new ConcurrentHashMap<>();
 
-  GrpcCrud(ManagedChannel channel, Config cfg) {
+  GrpcCrud(ManagedChannel channel, Settings cfg) {
     this.channel = channel;
     this.stub = GemFireGrpc.newBlockingStub(channel);
     this.cfg = cfg;

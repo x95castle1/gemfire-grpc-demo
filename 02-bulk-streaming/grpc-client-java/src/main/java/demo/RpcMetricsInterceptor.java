@@ -20,14 +20,14 @@ import io.grpc.Status;
  * bulk call was chunked: e.g. one PutStream of 10,000 entries in chunks of 500 = 21 messages sent
  * (the StreamConfig first, then 20 chunks) and 1 received.
  *
- * <p>This is the RPC-level view. {@code demo_op_latency_seconds} (recorded in {@link Api}) stays
+ * <p>This is the RPC-level view. {@code demo_op_latency_seconds} (recorded in {@link BulkController}) stays
  * the operation-level view that's compared with the native client, which has no interceptors.
  */
-final class RpcMetrics implements ClientInterceptor {
+final class RpcMetricsInterceptor implements ClientInterceptor {
 
-  private final Metrics metrics;
+  private final DemoMetrics metrics;
 
-  RpcMetrics(Metrics metrics) {
+  RpcMetricsInterceptor(DemoMetrics metrics) {
     this.metrics = metrics;
   }
 

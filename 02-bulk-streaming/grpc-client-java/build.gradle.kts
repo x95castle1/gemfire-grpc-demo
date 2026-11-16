@@ -1,5 +1,8 @@
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
+
 plugins {
-    application
+    java
+    id("org.springframework.boot") version "4.1.2"
     id("com.google.protobuf") version "0.9.5"
 }
 
@@ -19,6 +22,10 @@ java {
 }
 
 dependencies {
+    implementation(platform(SpringBootPlugin.BOM_COORDINATES))
+    // Plain Spring Boot (Spring MVC on Tomcat).
+    implementation("org.springframework.boot:spring-boot-starter-webmvc")
+
     implementation("io.grpc:grpc-netty-shaded:$grpcVersion")
     implementation("io.grpc:grpc-protobuf:$grpcVersion")
     implementation("io.grpc:grpc-stub:$grpcVersion")
@@ -29,24 +36,23 @@ dependencies {
     compileOnly("org.apache.tomcat:annotations-api:6.0.53")
 
     implementation("io.prometheus:prometheus-metrics-core:$prometheusVersion")
-    implementation("io.prometheus:prometheus-metrics-exporter-httpserver:$prometheusVersion")
+    implementation("io.prometheus:prometheus-metrics-exposition-formats:$prometheusVersion")
     implementation("io.prometheus:prometheus-metrics-instrumentation-jvm:$prometheusVersion")
 }
 
 // gemfire.proto lives in src/main/proto/gemfire/v1/ (copied from gemfire-extensions/ by the Dockerfile).
+// The Spring Boot plugin already adds the grpc code generator to every proto task; this pins the
+// protoc and generator versions to the ones above.
 protobuf {
     protoc { artifact = "com.google.protobuf:protoc:$protobufVersion" }
     plugins {
-        create("grpc") { artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion" }
+        maybeCreate("grpc").artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
     }
     generateProtoTasks {
-        all().forEach { it.plugins { create("grpc") } }
+        all().forEach { it.plugins { maybeCreate("grpc") } }
     }
 }
 
-application {
-    mainClass.set("demo.Main")
-    // sun.net.httpserver.nodelay: without TCP_NODELAY the JDK HTTP server's separate header and
-    // body writes hit Nagle + delayed ACK, adding ~40 ms to back-to-back keep-alive requests.
-    applicationDefaultJvmArgs = listOf("-XX:+UseZGC", "-Xms256m", "-Xmx512m", "-Dsun.net.httpserver.nodelay=true")
+tasks.bootJar {
+    archiveFileName = "app.jar"
 }

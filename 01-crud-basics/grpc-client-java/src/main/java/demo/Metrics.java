@@ -2,8 +2,13 @@ package demo;
 
 import io.prometheus.metrics.core.metrics.Counter;
 import io.prometheus.metrics.core.metrics.Histogram;
-import io.prometheus.metrics.exporter.httpserver.MetricsHandler;
+import io.prometheus.metrics.expositionformats.ExpositionFormatWriter;
+import io.prometheus.metrics.expositionformats.ExpositionFormats;
 import io.prometheus.metrics.instrumentation.jvm.JvmMetrics;
+import io.prometheus.metrics.model.registry.PrometheusRegistry;
+import java.io.IOException;
+import java.io.OutputStream;
+import org.springframework.stereotype.Component;
 
 /**
  * In-app metrics, served at /metrics by {@link Api}. Names and labels are identical in every
@@ -19,6 +24,7 @@ import io.prometheus.metrics.instrumentation.jvm.JvmMetrics;
  *       interceptor, so the native client never has any.
  * </ul>
  */
+@Component
 final class Metrics {
 
   /** 50µs .. 2.5s: fine-grained at the low end where unary cache ops live. */
@@ -69,8 +75,16 @@ final class Metrics {
     checks.labelValues(client, example, "fail");
   }
 
-  MetricsHandler handler() {
-    return new MetricsHandler();
+  private final ExpositionFormats formats = ExpositionFormats.init();
+
+  /**
+   * Writes every metric to {@code out} in the format the scraper asked for (its Accept header),
+   * the same negotiation the Prometheus client's own HTTP server does. Returns the content type.
+   */
+  String scrape(String accept, OutputStream out) throws IOException {
+    ExpositionFormatWriter writer = formats.findWriter(accept);
+    writer.write(out, PrometheusRegistry.defaultRegistry.scrape());
+    return writer.getContentType();
   }
 
   /** One /crud operation: code is "OK", a gRPC status code, or an exception class name. */

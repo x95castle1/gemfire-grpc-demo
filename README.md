@@ -70,7 +70,9 @@ with native, e.g. `grpc-java vs native: 73% slower` or, from 2× up, `3.0× slow
 
 ## Conventions used by every example
 
-- **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN`/`83NN` on the host). Each
+- **Clients are HTTP services** (`:8080` in the container, `81NN`/`82NN`/`83NN` on the host). The
+  Java clients are plain Spring Boot apps (Spring MVC on Tomcat, no Spring Data for GemFire) that
+  share one `@RestController`, so the HTTP layer is identical on both sides of a comparison. Each
   runs a narrated demo with assertions at startup (`POST /demo` re-runs it; 200 means everything
   passed) and serves the example's API for load tests (`/crud/*` in 01, `/bulk/*` in 02).
 - **The same metric names in every client**, with buckets from 50 µs to 2.5 s (to 60 s in 02):

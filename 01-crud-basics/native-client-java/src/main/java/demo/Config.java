@@ -1,6 +1,9 @@
 package demo;
 
-/** Service settings, read from environment variables (see ../.env and docker-compose.yml). */
+/**
+ * Demo settings, read from environment variables (see ../.env and docker-compose.yml). The HTTP
+ * server's PORT and HTTP_THREADS are Spring Boot properties (application.properties).
+ */
 record Config(
     String client,
     String example,
@@ -8,8 +11,6 @@ record Config(
     String demoRegion,
     String keyPrefix,
     int payloadBytes,
-    int port,
-    int httpThreads,
     boolean demoOnStart) {
 
   static Config fromEnv(String client) {
@@ -21,8 +22,6 @@ record Config(
         env("DEMO_REGION", "demo-" + shortName),
         env("KEY_PREFIX", shortName + ":"),
         Integer.parseInt(env("PAYLOAD_BYTES", "1024")),
-        Integer.parseInt(env("PORT", "8080")),
-        Integer.parseInt(env("HTTP_THREADS", "64")),
         Boolean.parseBoolean(env("DEMO_ON_START", "true")));
   }
 

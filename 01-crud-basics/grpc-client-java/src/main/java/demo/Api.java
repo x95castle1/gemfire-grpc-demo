@@ -1,25 +1,38 @@
 package demo;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.availability.ApplicationAvailability;
+import org.springframework.boot.availability.ReadinessState;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * The HTTP API that load tests (k6) and humans call. Identical in every Java client. Only the
- * {@link Crud} implementation differs (gRPC vs native).
+ * {@link Crud} bean differs (gRPC vs native), and it's wired up in each client's
+ * {@code Application}.
  *
  * <pre>
  *   GET  /                          endpoint list
- *   GET  /health                    200 once the GemFire connection is up
+ *   GET  /health                    200 once the startup demo has run and the API takes traffic
  *   GET  /metrics                   Prometheus metrics
  *   GET  /demo                      result of the last demo run
  *   POST /demo                      run the narrated demo; 200 = all checks passed
@@ -31,7 +44,8 @@ import java.util.function.Supplier;
  * Every /crud response carries {@code X-GemFire-Micros}: the time spent in the GemFire call
  * alone. k6 records it next to its own end-to-end timing.
  */
-final class Api {
+@RestController
+class Api implements ApplicationRunner {
 
   /** One client's implementation of the 13 unary operations. */
   interface Crud {
@@ -76,36 +90,36 @@ final class Api {
   }
 
   private static final int MAX_PAYLOAD_BYTES = 16 * 1024 * 1024;
+  private static final MediaType TEXT = MediaType.parseMediaType("text/plain;charset=UTF-8");
+  private static final Logger log = LoggerFactory.getLogger(Api.class);
 
   private final Config cfg;
   private final Metrics metrics;
   private final Crud crud;
   private final Supplier<Checks.Report> demo;
+  private final ApplicationAvailability availability;
   private volatile Checks.Report lastDemo;
-  private HttpServer server;
 
-  Api(Config cfg, Metrics metrics, Crud crud, Supplier<Checks.Report> demo) {
+  Api(Config cfg, Metrics metrics, Crud crud, Supplier<Checks.Report> demo, ApplicationAvailability availability) {
     this.cfg = cfg;
     this.metrics = metrics;
     this.crud = crud;
     this.demo = demo;
+    this.availability = availability;
   }
 
-  void start() throws IOException {
-    server = HttpServer.create(new InetSocketAddress(cfg.port()), 1024);
-    // A fixed pool of platform threads, the same in every client, so concurrency is identical
-    // on both sides of the comparison.
-    server.setExecutor(Executors.newFixedThreadPool(cfg.httpThreads()));
-    server.createContext("/", this::index);
-    server.createContext("/health", ex -> send(ex, 200, "text/plain", "ok"));
-    server.createContext("/metrics", metrics.handler());
-    server.createContext("/demo", this::demo);
-    server.createContext("/crud/", this::crud);
-    server.start();
-    System.out.printf("[%s] HTTP API listening on :%d (%d threads)%n", cfg.client(), cfg.port(), cfg.httpThreads());
+  /**
+   * Runs the startup demo. Spring Boot calls runners after Tomcat is listening but before it
+   * marks the app ready, so /health stays 503 (and Docker keeps the client "starting") until the
+   * demo is done.
+   */
+  @Override
+  public void run(ApplicationArguments args) {
+    log.info("{} ({}) serving region {}", cfg.client(), cfg.example(), cfg.region());
+    if (cfg.demoOnStart()) runDemo();
   }
 
-  /** Runs the demo now (used at startup) and remembers the result for GET /demo. */
+  /** Runs the demo now and remembers the result for GET /demo. */
   synchronized Checks.Report runDemo() {
     lastDemo = demo.get();
     return lastDemo;
@@ -113,11 +127,8 @@ final class Api {
 
   // ---------------------------------------------------------------------------------------------
 
-  private void index(HttpExchange ex) throws IOException {
-    if (!ex.getRequestURI().getPath().equals("/")) {
-      send(ex, 404, "application/json", "{\"error\":\"not found\"}");
-      return;
-    }
+  @GetMapping("/")
+  ResponseEntity<String> index() {
     StringBuilder sb = new StringBuilder();
     sb.append(cfg.client()).append(" (").append(cfg.example()).append(")\n\n");
     sb.append("GET  /health\nGET  /metrics\nGET  /demo\nPOST /demo\n");
@@ -127,119 +138,114 @@ final class Api {
       sb.append(read ? "GET  " : "POST ").append("/crud/").append(e.getKey());
       sb.append(e.getValue().equals("EntryCount") ? "" : "?key=42").append('\n');
     }
-    send(ex, 200, "text/plain", sb.toString());
+    return ResponseEntity.ok().contentType(TEXT).body(sb.toString());
   }
 
-  private void demo(HttpExchange ex) throws IOException {
-    if (ex.getRequestMethod().equals("POST")) {
-      Checks.Report r = runDemo();
-      send(ex, r.failed() == 0 ? 200 : 500, "text/plain; charset=utf-8", r.text());
-    } else {
-      Checks.Report r = lastDemo;
-      String body = r == null ? "{\"ran\":false}"
-          : String.format("{\"ran\":true,\"passed\":%d,\"failed\":%d}", r.passed(), r.failed());
-      send(ex, 200, "application/json", body);
+  @GetMapping("/health")
+  ResponseEntity<String> health() {
+    boolean ready = availability.getReadinessState() == ReadinessState.ACCEPTING_TRAFFIC;
+    return ResponseEntity.status(ready ? 200 : 503).contentType(TEXT).body(ready ? "ok" : "starting");
+  }
+
+  @GetMapping("/metrics")
+  ResponseEntity<byte[]> metrics(@RequestHeader(name = "Accept", required = false) String accept) throws IOException {
+    ByteArrayOutputStream out = new ByteArrayOutputStream(64 * 1024);
+    String type = metrics.scrape(accept, out);
+    return ResponseEntity.ok().header("Content-Type", type).body(out.toByteArray());
+  }
+
+  @GetMapping("/demo")
+  Map<String, Object> lastDemo() {
+    Checks.Report r = lastDemo;
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ran", r != null);
+    if (r != null) {
+      body.put("passed", r.passed());
+      body.put("failed", r.failed());
     }
+    return body;
   }
 
-  private void crud(HttpExchange ex) throws IOException {
-    String segment = ex.getRequestURI().getPath().substring("/crud/".length());
-    Map<String, String> q = query(ex);
+  @PostMapping("/demo")
+  ResponseEntity<String> demo() {
+    Checks.Report r = runDemo();
+    return ResponseEntity.status(r.failed() == 0 ? 200 : 500).contentType(TEXT).body(r.text());
+  }
+
+  @RequestMapping(path = "/crud/preload", method = {RequestMethod.GET, RequestMethod.POST})
+  ResponseEntity<Map<String, Object>> preload(
+      @RequestParam(defaultValue = "10000") int count, @RequestParam(required = false) Integer size) throws Exception {
+    int bytes = size(size);
+    long start = System.nanoTime();
+    int written = crud.preload(count, bytes);
+    long micros = (System.nanoTime() - start) / 1000;
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("op", "Preload");
+    body.put("written", written);
+    body.put("micros", micros);
+    return ResponseEntity.ok().header("X-GemFire-Micros", Long.toString(micros)).body(body);
+  }
+
+  @RequestMapping(path = "/crud/{segment}", method = {RequestMethod.GET, RequestMethod.POST})
+  ResponseEntity<Map<String, Object>> crud(
+      @PathVariable String segment,
+      @RequestParam(required = false) String key,
+      @RequestParam(required = false) Integer size) {
+    int bytes = size(size);
+    String op = OPS.get(segment);
+    Map<String, Object> body = new LinkedHashMap<>();
+    if (op == null) {
+      body.put("error", "unknown op: " + segment);
+      body.put("ops", "GET /");
+      return ResponseEntity.status(404).body(body);
+    }
+    if (key == null && !op.equals("EntryCount")) throw new IllegalArgumentException("key is required");
+
+    Object result;
+    long start = System.nanoTime();
     try {
-      int size = q.containsKey("size") ? Integer.parseInt(q.get("size")) : cfg.payloadBytes();
-      if (size < 0 || size > MAX_PAYLOAD_BYTES) throw new IllegalArgumentException("size must be 0.." + MAX_PAYLOAD_BYTES);
-
-      if (segment.equals("preload")) {
-        int count = Integer.parseInt(q.getOrDefault("count", "10000"));
-        long start = System.nanoTime();
-        int written = crud.preload(count, size);
-        long micros = (System.nanoTime() - start) / 1000;
-        ex.getResponseHeaders().set("X-GemFire-Micros", Long.toString(micros));
-        send(ex, 200, "application/json", String.format("{\"op\":\"Preload\",\"written\":%d,\"micros\":%d}", written, micros));
-        return;
-      }
-
-      String op = OPS.get(segment);
-      if (op == null) {
-        send(ex, 404, "application/json", "{\"error\":\"unknown op: " + json(segment) + "\",\"ops\":\"GET /\"}");
-        return;
-      }
-      String key = q.get("key");
-      if (key == null && !op.equals("EntryCount")) throw new IllegalArgumentException("key is required");
-
-      Object result;
-      long start = System.nanoTime();
-      try {
-        result = crud.execute(op, key == null ? null : cfg.keyPrefix() + key, size);
-      } catch (Exception e) {
-        String code = crud.errorCode(e);
-        metrics.recordOp(op, code, System.nanoTime() - start);   // failures are timed too
-        ex.getResponseHeaders().set("X-Error-Code", code);
-        send(ex, 502, "application/json", String.format(
-            "{\"op\":\"%s\",\"error\":\"%s\",\"message\":\"%s\"}", op, code, json(String.valueOf(e.getMessage()))));
-        return;
-      }
-      long nanos = System.nanoTime() - start;
-      metrics.recordOp(op, "OK", nanos);
-
-      StringBuilder body = new StringBuilder().append("{\"op\":\"").append(op).append('"');
-      if (key != null) body.append(",\"key\":\"").append(json(key)).append('"');
-      String field = RESULT_FIELD.get(op);
-      if (field != null) body.append(",\"").append(field).append("\":").append(result);
-      body.append(",\"micros\":").append(nanos / 1000).append('}');
-      ex.getResponseHeaders().set("X-GemFire-Micros", Long.toString(nanos / 1000));
-      send(ex, 200, "application/json", body.toString());
-    } catch (IllegalArgumentException e) {
-      send(ex, 400, "application/json", "{\"error\":\"" + json(String.valueOf(e.getMessage())) + "\"}");
+      result = crud.execute(op, key == null ? null : cfg.keyPrefix() + key, bytes);
     } catch (Exception e) {
-      send(ex, 500, "application/json", "{\"error\":\"" + json(String.valueOf(e)) + "\"}");
+      String code = crud.errorCode(e);
+      metrics.recordOp(op, code, System.nanoTime() - start);   // failures are timed too
+      body.put("op", op);
+      body.put("error", code);
+      body.put("message", String.valueOf(e.getMessage()));
+      return ResponseEntity.status(502).header("X-Error-Code", code).body(body);
     }
+    long nanos = System.nanoTime() - start;
+    metrics.recordOp(op, "OK", nanos);
+
+    body.put("op", op);
+    if (key != null) body.put("key", key);
+    String field = RESULT_FIELD.get(op);
+    if (field != null) body.put(field, result);
+    body.put("micros", nanos / 1000);
+    return ResponseEntity.ok().header("X-GemFire-Micros", Long.toString(nanos / 1000)).body(body);
+  }
+
+  @ExceptionHandler(IllegalArgumentException.class)
+  ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException e) {
+    return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
+  }
+
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  ResponseEntity<Map<String, Object>> notANumber(MethodArgumentTypeMismatchException e) {
+    return ResponseEntity.badRequest().body(Map.of("error", e.getName() + " must be a number"));
+  }
+
+  @ExceptionHandler(Exception.class)
+  ResponseEntity<Map<String, Object>> failed(Exception e) {
+    return ResponseEntity.status(500).body(Map.of("error", String.valueOf(e)));
   }
 
   static boolean isRead(String op) {
     return op.equals("Get") || op.equals("ContainsKey") || op.equals("EntryCount");
   }
 
-  private static Map<String, String> query(HttpExchange ex) {
-    Map<String, String> out = new HashMap<>();
-    String raw = ex.getRequestURI().getRawQuery();
-    if (raw == null) return out;
-    for (String pair : raw.split("&")) {
-      int i = pair.indexOf('=');
-      if (i > 0) {
-        out.put(URLDecoder.decode(pair.substring(0, i), StandardCharsets.UTF_8),
-            URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
-      }
-    }
-    return out;
-  }
-
-  private static String json(String s) {
-    StringBuilder sb = new StringBuilder(s.length() + 8);
-    for (char c : s.toCharArray()) {
-      switch (c) {
-        case '"' -> sb.append("\\\"");
-        case '\\' -> sb.append("\\\\");
-        case '\n' -> sb.append("\\n");
-        case '\r' -> sb.append("\\r");
-        case '\t' -> sb.append("\\t");
-        default -> {
-          if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-          else sb.append(c);
-        }
-      }
-    }
-    return sb.toString();
-  }
-
-  private static void send(HttpExchange ex, int status, String type, String body) throws IOException {
-    // Drain any request body so keep-alive connections can be reused.
-    ex.getRequestBody().readAllBytes();
-    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-    ex.getResponseHeaders().set("Content-Type", type);
-    ex.sendResponseHeaders(status, bytes.length);
-    try (OutputStream os = ex.getResponseBody()) {
-      os.write(bytes);
-    }
+  private int size(Integer size) {
+    int bytes = size == null ? cfg.payloadBytes() : size;
+    if (bytes < 0 || bytes > MAX_PAYLOAD_BYTES) throw new IllegalArgumentException("size must be 0.." + MAX_PAYLOAD_BYTES);
+    return bytes;
   }
 }

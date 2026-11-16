@@ -6,9 +6,9 @@ COPY settings.gradle.kts build.gradle.kts ./
 COPY src ./src
 COPY --from=gemfire-extensions gemfire.proto src/main/proto/gemfire/v1/gemfire.proto
 RUN --mount=type=cache,target=/home/gradle/.gradle \
-    gradle --no-daemon --quiet installDist
+    gradle --no-daemon --quiet bootJar
 
 FROM eclipse-temurin:21-jre
-COPY --from=build /src/build/install/grpc-client-java /app
+COPY --from=build /src/build/libs/app.jar /app/app.jar
 EXPOSE 8080
-ENTRYPOINT ["/app/bin/grpc-client-java"]
+ENTRYPOINT ["java", "-XX:+UseZGC", "-Xms256m", "-Xmx512m", "-jar", "/app/app.jar"]

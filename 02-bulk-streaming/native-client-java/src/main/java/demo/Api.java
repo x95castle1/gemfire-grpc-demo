@@ -1,27 +1,39 @@
 package demo;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.availability.ApplicationAvailability;
+import org.springframework.boot.availability.ReadinessState;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * The HTTP API that load tests (k6) and humans call. Identical in every Java client. Only the
- * {@link Bulk} implementation differs (gRPC streams vs the native bulk Region API).
+ * {@link Bulk} bean differs (gRPC streams vs the native bulk Region API), and it's wired up in
+ * each client's {@code Application}.
  *
  * <pre>
  *   GET  /                                       endpoint list
- *   GET  /health                                 200 once the GemFire connection is up
+ *   GET  /health                                 200 once the startup demo has run and the API takes traffic
  *   GET  /metrics                                Prometheus metrics
  *   GET  /demo                                   result of the last demo run
  *   POST /demo                                   run the narrated demo; 200 = all checks passed
@@ -37,10 +49,11 @@ import java.util.function.Supplier;
  * {@code batch} is the chunk size on both sides: entries per stream message for gRPC, entries per
  * putAll/getAll/removeAll call for native. {@code mode=unary} does the same work without bulk
  * calls, one Put/Get/Remove per entry (native: region.put/get/remove), with {@code inflight}
- * calls at a time (1 = a plain loop). It's the baseline that shows what streaming buys. Every /bulk response carries {@code X-GemFire-Micros}
- * (the time spent in GemFire calls alone) and {@code X-Entries} (entries moved). k6 records both.
+ * calls at a time (1 = a plain loop). It's the baseline that shows what streaming buys. Every /bulk response carries
+ * {@code X-GemFire-Micros} (the time spent in GemFire calls alone) and {@code X-Entries} (entries moved). k6 records both.
  */
-final class Api {
+@RestController
+class Api implements ApplicationRunner {
 
   /** One client's implementation of the bulk operations. */
   interface Bulk {
@@ -109,35 +122,36 @@ final class Api {
   /** Chunks are also capped at this many bytes of values, whatever {@code batch} says. */
   static final int MAX_CHUNK_BYTES = 1 << 20;
 
+  private static final MediaType TEXT = MediaType.parseMediaType("text/plain;charset=UTF-8");
+  private static final Logger log = LoggerFactory.getLogger(Api.class);
+
   private final Config cfg;
   private final Metrics metrics;
   private final Bulk bulk;
   private final Supplier<Checks.Report> demo;
+  private final ApplicationAvailability availability;
   private volatile Checks.Report lastDemo;
-  private HttpServer server;
 
-  Api(Config cfg, Metrics metrics, Bulk bulk, Supplier<Checks.Report> demo) {
+  Api(Config cfg, Metrics metrics, Bulk bulk, Supplier<Checks.Report> demo, ApplicationAvailability availability) {
     this.cfg = cfg;
     this.metrics = metrics;
     this.bulk = bulk;
     this.demo = demo;
+    this.availability = availability;
   }
 
-  void start() throws IOException {
-    server = HttpServer.create(new InetSocketAddress(cfg.port()), 1024);
-    // A fixed pool of platform threads, the same in every client, so concurrency is identical
-    // on both sides of the comparison.
-    server.setExecutor(Executors.newFixedThreadPool(cfg.httpThreads()));
-    server.createContext("/", this::index);
-    server.createContext("/health", ex -> send(ex, 200, "text/plain", "ok"));
-    server.createContext("/metrics", metrics.handler());
-    server.createContext("/demo", this::demo);
-    server.createContext("/bulk/", this::bulk);
-    server.start();
-    System.out.printf("[%s] HTTP API listening on :%d (%d threads)%n", cfg.client(), cfg.port(), cfg.httpThreads());
+  /**
+   * Runs the startup demo. Spring Boot calls runners after Tomcat is listening but before it
+   * marks the app ready, so /health stays 503 (and Docker keeps the client "starting") until the
+   * demo is done.
+   */
+  @Override
+  public void run(ApplicationArguments args) {
+    log.info("{} ({}) serving region {}", cfg.client(), cfg.example(), cfg.region());
+    if (cfg.demoOnStart()) runDemo();
   }
 
-  /** Runs the demo now (used at startup) and remembers the result for GET /demo. */
+  /** Runs the demo now and remembers the result for GET /demo. */
   synchronized Checks.Report runDemo() {
     lastDemo = demo.get();
     return lastDemo;
@@ -150,11 +164,8 @@ final class Api {
 
   // ---------------------------------------------------------------------------------------------
 
-  private void index(HttpExchange ex) throws IOException {
-    if (!ex.getRequestURI().getPath().equals("/")) {
-      send(ex, 404, "application/json", "{\"error\":\"not found\"}");
-      return;
-    }
+  @GetMapping("/")
+  ResponseEntity<String> index() {
     String text = cfg.client() + " (" + cfg.example() + "), region " + cfg.region() + "\n\n"
         + "GET  /health\nGET  /metrics\nGET  /demo\nPOST /demo\n"
         + "POST /bulk/put?start=0&count=10000&batch=500&size=" + cfg.payloadBytes() + "\n"
@@ -164,150 +175,140 @@ final class Api {
         + "POST /bulk/reset\n\n"
         + "put/get/remove also take mode=stream|unary and inflight=1.." + MAX_INFLIGHT + " (unary only), e.g.\n"
         + "POST /bulk/put?count=2000&mode=unary&inflight=16\n";
-    send(ex, 200, "text/plain", text);
+    return ResponseEntity.ok().contentType(TEXT).body(text);
   }
 
-  private void demo(HttpExchange ex) throws IOException {
-    if (ex.getRequestMethod().equals("POST")) {
-      Checks.Report r = runDemo();
-      send(ex, r.failed() == 0 ? 200 : 500, "text/plain; charset=utf-8", r.text());
-    } else {
-      Checks.Report r = lastDemo;
-      String body = r == null ? "{\"ran\":false}"
-          : String.format("{\"ran\":true,\"passed\":%d,\"failed\":%d}", r.passed(), r.failed());
-      send(ex, 200, "application/json", body);
+  @GetMapping("/health")
+  ResponseEntity<String> health() {
+    boolean ready = availability.getReadinessState() == ReadinessState.ACCEPTING_TRAFFIC;
+    return ResponseEntity.status(ready ? 200 : 503).contentType(TEXT).body(ready ? "ok" : "starting");
+  }
+
+  @GetMapping("/metrics")
+  ResponseEntity<byte[]> metrics(@RequestHeader(name = "Accept", required = false) String accept) throws IOException {
+    ByteArrayOutputStream out = new ByteArrayOutputStream(64 * 1024);
+    String type = metrics.scrape(accept, out);
+    return ResponseEntity.ok().header("Content-Type", type).body(out.toByteArray());
+  }
+
+  @GetMapping("/demo")
+  Map<String, Object> lastDemo() {
+    Checks.Report r = lastDemo;
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("ran", r != null);
+    if (r != null) {
+      body.put("passed", r.passed());
+      body.put("failed", r.failed());
     }
+    return body;
   }
 
-  private void bulk(HttpExchange ex) throws IOException {
-    String segment = ex.getRequestURI().getPath().substring("/bulk/".length());
-    Map<String, String> q = query(ex);
+  @PostMapping("/demo")
+  ResponseEntity<String> demo() {
+    Checks.Report r = runDemo();
+    return ResponseEntity.status(r.failed() == 0 ? 200 : 500).contentType(TEXT).body(r.text());
+  }
+
+  @RequestMapping(path = "/bulk/reset", method = {RequestMethod.GET, RequestMethod.POST})
+  Map<String, Object> reset() throws Exception {
+    long t0 = System.nanoTime();
+    long removed = bulk.reset();
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("op", "Reset");
+    body.put("removed", removed);
+    body.put("micros", (System.nanoTime() - t0) / 1000);
+    return body;
+  }
+
+  @RequestMapping(path = "/bulk/{segment}", method = {RequestMethod.GET, RequestMethod.POST})
+  ResponseEntity<Map<String, Object>> bulk(
+      @PathVariable String segment,
+      @RequestParam(defaultValue = "0") int start,
+      @RequestParam(defaultValue = "10000") int count,
+      @RequestParam(defaultValue = "500") int batch,
+      @RequestParam(required = false) Integer size,
+      @RequestParam(defaultValue = "stream") String mode,
+      @RequestParam(defaultValue = "1") int inflight) {
+    check("start", start, 0, Integer.MAX_VALUE - MAX_COUNT);
+    check("count", count, 0, MAX_COUNT);
+    check("batch", batch, 1, 100_000);
+    int bytes = size == null ? cfg.payloadBytes() : size;
+    check("size", bytes, 0, MAX_PAYLOAD_BYTES);
+    if (!mode.equals("stream") && !mode.equals("unary")) throw new IllegalArgumentException("mode must be stream or unary");
+    boolean unary = mode.equals("unary");
+    check("inflight", inflight, 1, MAX_INFLIGHT);
+
+    Map<String, Object> body = new LinkedHashMap<>();
+    String stream = OPS.get(segment);
+    if (stream == null) {
+      body.put("error", "unknown op: " + segment);
+      body.put("ops", "GET /");
+      return ResponseEntity.status(404).body(body);
+    }
+    // KeySetStream has no unary counterpart: no single-key RPC lists keys.
+    if (unary && !UNARY.containsKey(stream)) throw new IllegalArgumentException(segment + " has no unary mode");
+    String op = unary ? UNARY.get(stream) : stream;
+
+    Result result;
+    long t0 = System.nanoTime();
     try {
-      int start = intParam(q, "start", 0, 0, Integer.MAX_VALUE - MAX_COUNT);
-      int count = intParam(q, "count", 10_000, 0, MAX_COUNT);
-      int batch = intParam(q, "batch", 500, 1, 100_000);
-      int size = intParam(q, "size", cfg.payloadBytes(), 0, MAX_PAYLOAD_BYTES);
-      String mode = q.getOrDefault("mode", "stream");
-      if (!mode.equals("stream") && !mode.equals("unary")) throw new IllegalArgumentException("mode must be stream or unary");
-      boolean unary = mode.equals("unary");
-      int inflight = intParam(q, "inflight", 1, 1, MAX_INFLIGHT);
-
-      if (segment.equals("reset")) {
-        long t0 = System.nanoTime();
-        long removed = bulk.reset();
-        send(ex, 200, "application/json", String.format(
-            "{\"op\":\"Reset\",\"removed\":%d,\"micros\":%d}", removed, (System.nanoTime() - t0) / 1000));
-        return;
-      }
-
-      String stream = OPS.get(segment);
-      if (stream == null) {
-        send(ex, 404, "application/json", "{\"error\":\"unknown op: " + json(segment) + "\",\"ops\":\"GET /\"}");
-        return;
-      }
-      // KeySetStream has no unary counterpart: no single-key RPC lists keys.
-      if (unary && !UNARY.containsKey(stream)) throw new IllegalArgumentException(segment + " has no unary mode");
-      String op = unary ? UNARY.get(stream) : stream;
-
-      Result result;
-      long t0 = System.nanoTime();
-      try {
-        result = switch (op) {
-          case "PutStream" -> bulk.put(start, count, batch, size);
-          case "GetStream" -> bulk.get(start, count, batch);
-          case "RemoveStream" -> bulk.remove(start, count, batch);
-          case "Put" -> bulk.unaryPut(start, count, size, inflight);
-          case "Get" -> bulk.unaryGet(start, count, inflight);
-          case "Remove" -> bulk.unaryRemove(start, count, inflight);
-          default -> bulk.keySet();
-        };
-      } catch (Exception e) {
-        String code = bulk.errorCode(e);
-        metrics.recordOp(op, code, System.nanoTime() - t0);   // failures are timed too
-        ex.getResponseHeaders().set("X-Error-Code", code);
-        send(ex, 502, "application/json", String.format(
-            "{\"op\":\"%s\",\"error\":\"%s\",\"message\":\"%s\"}", op, code, json(String.valueOf(e.getMessage()))));
-        return;
-      }
-      long nanos = System.nanoTime() - t0;
-      metrics.recordOp(op, "OK", nanos);
-      metrics.recordEntries(op, result.entries());
-
-      StringBuilder body = new StringBuilder().append("{\"op\":\"").append(op).append('"');
-      body.append(",\"mode\":\"").append(mode).append('"');
-      if (unary) {
-        body.append(",\"inflight\":").append(inflight)
-            .append(",\"start\":").append(start).append(",\"requested\":").append(count);
-      } else if (!op.equals("KeySetStream")) {
-        body.append(",\"start\":").append(start).append(",\"requested\":").append(count)
-            .append(",\"batch\":").append(op.equals("PutStream") ? chunk(batch, size) : batch);
-      }
-      body.append(",\"entries\":").append(result.entries())
-          .append(",\"messages\":").append(result.messages())
-          .append(",\"micros\":").append(nanos / 1000).append('}');
-      ex.getResponseHeaders().set("X-GemFire-Micros", Long.toString(nanos / 1000));
-      ex.getResponseHeaders().set("X-Entries", Long.toString(result.entries()));
-      send(ex, 200, "application/json", body.toString());
-    } catch (IllegalArgumentException e) {
-      send(ex, 400, "application/json", "{\"error\":\"" + json(String.valueOf(e.getMessage())) + "\"}");
+      result = switch (op) {
+        case "PutStream" -> bulk.put(start, count, batch, bytes);
+        case "GetStream" -> bulk.get(start, count, batch);
+        case "RemoveStream" -> bulk.remove(start, count, batch);
+        case "Put" -> bulk.unaryPut(start, count, bytes, inflight);
+        case "Get" -> bulk.unaryGet(start, count, inflight);
+        case "Remove" -> bulk.unaryRemove(start, count, inflight);
+        default -> bulk.keySet();
+      };
     } catch (Exception e) {
-      send(ex, 500, "application/json", "{\"error\":\"" + json(String.valueOf(e)) + "\"}");
+      String code = bulk.errorCode(e);
+      metrics.recordOp(op, code, System.nanoTime() - t0);   // failures are timed too
+      body.put("op", op);
+      body.put("error", code);
+      body.put("message", String.valueOf(e.getMessage()));
+      return ResponseEntity.status(502).header("X-Error-Code", code).body(body);
     }
+    long nanos = System.nanoTime() - t0;
+    metrics.recordOp(op, "OK", nanos);
+    metrics.recordEntries(op, result.entries());
+
+    body.put("op", op);
+    body.put("mode", mode);
+    if (unary) {
+      body.put("inflight", inflight);
+      body.put("start", start);
+      body.put("requested", count);
+    } else if (!op.equals("KeySetStream")) {
+      body.put("start", start);
+      body.put("requested", count);
+      body.put("batch", op.equals("PutStream") ? chunk(batch, bytes) : batch);
+    }
+    body.put("entries", result.entries());
+    body.put("messages", result.messages());
+    body.put("micros", nanos / 1000);
+    return ResponseEntity.ok()
+        .header("X-GemFire-Micros", Long.toString(nanos / 1000))
+        .header("X-Entries", Long.toString(result.entries()))
+        .body(body);
   }
 
-  private static int intParam(Map<String, String> q, String name, int def, int min, int max) {
-    String raw = q.get(name);
-    if (raw == null || raw.isBlank()) return def;
-    int v;
-    try {
-      v = Integer.parseInt(raw.trim());
-    } catch (NumberFormatException e) {
-      throw new IllegalArgumentException(name + " must be a number");
-    }
+  @ExceptionHandler(IllegalArgumentException.class)
+  ResponseEntity<Map<String, Object>> badRequest(IllegalArgumentException e) {
+    return ResponseEntity.badRequest().body(Map.of("error", String.valueOf(e.getMessage())));
+  }
+
+  @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+  ResponseEntity<Map<String, Object>> notANumber(MethodArgumentTypeMismatchException e) {
+    return ResponseEntity.badRequest().body(Map.of("error", e.getName() + " must be a number"));
+  }
+
+  @ExceptionHandler(Exception.class)
+  ResponseEntity<Map<String, Object>> failed(Exception e) {
+    return ResponseEntity.status(500).body(Map.of("error", String.valueOf(e)));
+  }
+
+  private static void check(String name, int v, int min, int max) {
     if (v < min || v > max) throw new IllegalArgumentException(name + " must be " + min + ".." + max);
-    return v;
-  }
-
-  private static Map<String, String> query(HttpExchange ex) {
-    Map<String, String> out = new HashMap<>();
-    String raw = ex.getRequestURI().getRawQuery();
-    if (raw == null) return out;
-    for (String pair : raw.split("&")) {
-      int i = pair.indexOf('=');
-      if (i > 0) {
-        out.put(URLDecoder.decode(pair.substring(0, i), StandardCharsets.UTF_8),
-            URLDecoder.decode(pair.substring(i + 1), StandardCharsets.UTF_8));
-      }
-    }
-    return out;
-  }
-
-  private static String json(String s) {
-    StringBuilder sb = new StringBuilder(s.length() + 8);
-    for (char c : s.toCharArray()) {
-      switch (c) {
-        case '"' -> sb.append("\\\"");
-        case '\\' -> sb.append("\\\\");
-        case '\n' -> sb.append("\\n");
-        case '\r' -> sb.append("\\r");
-        case '\t' -> sb.append("\\t");
-        default -> {
-          if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-          else sb.append(c);
-        }
-      }
-    }
-    return sb.toString();
-  }
-
-  private static void send(HttpExchange ex, int status, String type, String body) throws IOException {
-    // Drain any request body so keep-alive connections can be reused.
-    ex.getRequestBody().readAllBytes();
-    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-    ex.getResponseHeaders().set("Content-Type", type);
-    ex.sendResponseHeaders(status, bytes.length);
-    try (OutputStream os = ex.getResponseBody()) {
-      os.write(bytes);
-    }
   }
 }

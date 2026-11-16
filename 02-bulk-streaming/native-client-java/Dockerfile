@@ -11,9 +11,9 @@ WORKDIR /src
 COPY settings.gradle.kts build.gradle.kts ./
 COPY src ./src
 RUN --mount=type=cache,target=/home/gradle/.gradle \
-    gradle --no-daemon --quiet installDist -PgemfireLib=/gemfire/lib
+    gradle --no-daemon --quiet bootJar -PgemfireLib=/gemfire/lib
 
 FROM eclipse-temurin:21-jre
-COPY --from=build /src/build/install/native-client-java /app
+COPY --from=build /src/build/libs/app.jar /app/app.jar
 EXPOSE 8080
-ENTRYPOINT ["/app/bin/native-client-java"]
+ENTRYPOINT ["java", "-XX:+UseZGC", "-Xms256m", "-Xmx512m", "-jar", "/app/app.jar"]

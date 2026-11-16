@@ -39,8 +39,8 @@ Without `make`, run `docker compose up -d --build` in this folder. Smoke test: `
 
 ## The two clients
 
-The same Java 21 HTTP services as 01 (the JDK's built-in server, 64 worker threads). Only the
-class behind `/bulk` differs.
+The same plain Spring Boot apps as 01 (Spring MVC on Tomcat, 64 worker threads, no Spring Data
+for GemFire), with the same `@RestController` in both. Only the bean behind `/bulk` differs.
 
 | | native-java | grpc-java |
 |---|---|---|
@@ -235,8 +235,8 @@ FINDINGS_PLACEHOLDER
 ├── gemfire/
 │   ├── start-member.sh       # starts a locator/server with the gRPC extension and bulk-batch-size
 │   └── init.gfsh             # creates bulk-grpc, bulk-native, demo-grpc, demo-native
-├── grpc-client-java/         # Api, GrpcBulk, StreamCall, Demo, Metrics, RpcMetrics (interceptor)
-├── native-client-java/       # Api, NativeBulk, Demo, Metrics
+├── grpc-client-java/         # Application (Spring Boot), Api, GrpcBulk, StreamCall, Demo, Metrics, RpcMetrics (interceptor)
+├── native-client-java/       # Application (Spring Boot), Api, NativeBulk, Demo, Metrics
 └── monitoring/
     ├── prometheus.yml
     └── grafana/

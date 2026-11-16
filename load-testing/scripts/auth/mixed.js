@@ -1,5 +1,5 @@
 // Description: Who gets in: alice, bob, carol and nobody doing Gets and Puts on two regions, 20 req/s for 1m
-// Examples: 08
+// Examples: 08, 09
 // Clients: grpc-go
 // Run: parallel
 // Breakdown: user=alice,bob,carol,none

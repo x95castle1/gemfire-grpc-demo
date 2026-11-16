@@ -34,7 +34,7 @@ func tlsCreds(pool *x509.CertPool) credentials.TransportCredentials {
 // over TLS, the protocol version, cipher suite and the certificate the server presented.
 type CallInfo struct {
 	Server   string
-	Security string // "tls" or "insecure"
+	Security string // "tls", "insecure", or "none" when the call never reached a server
 	Version  string // "TLS 1.3"
 	Cipher   string
 	Cert     *x509.Certificate
@@ -42,7 +42,9 @@ type CallInfo struct {
 
 func callInfo(p *peer.Peer, servers *Servers) CallInfo {
 	ci := CallInfo{Server: servers.name(p.Addr), Security: "insecure"}
-	if t, ok := p.AuthInfo.(credentials.TLSInfo); ok {
+	if p.Addr == nil {
+		ci.Security = "none" // the call never reached a server (e.g. UNAVAILABLE during a failover)
+	} else if t, ok := p.AuthInfo.(credentials.TLSInfo); ok {
 		ci.Security = "tls"
 		ci.Version = tls.VersionName(t.State.Version)
 		ci.Cipher = tls.CipherSuiteName(t.State.CipherSuite)

@@ -86,7 +86,6 @@ func runDemo(crud *GrpcCrud, cfg Config, c *Checks) {
 	c.note("With one-way TLS the locator tells the client to use TLS for the servers, with the CA from the")
 	c.note("bootstrap's file_watcher provider (remove that file and the xds channel can't connect).")
 
-
 	c.section("5. Check it yourself")
 	c.note("From the host (the README shows a version that needs no openssl on your machine):")
 	c.note("  openssl s_client -connect <server1>:50051 -CAfile 06-tls/certs/ca.pem -servername server1")

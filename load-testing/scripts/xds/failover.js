@@ -1,5 +1,5 @@
 // Description: Failover: light traffic over both channels (20 req/s each, 2m); server1 is stopped at 40s and started at 80s
-// Examples: 05, 06, 07
+// Examples: 05, 06, 07, 09
 // Clients: grpc-go
 // Run: parallel
 // Breakdown: via=direct,xds

@@ -42,7 +42,7 @@ type Metrics struct {
 	certExpiry      *prometheus.GaugeVec
 	// clientCertExpiry is when the client's own certificate expires (Unix time).
 	clientCertExpiry *prometheus.GaugeVec
-	checks          *prometheus.CounterVec
+	checks           *prometheus.CounterVec
 }
 
 func newMetrics(cfg Config) *Metrics {

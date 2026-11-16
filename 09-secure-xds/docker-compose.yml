@@ -1,0 +1,201 @@
+name: gemfire-09-secure-xds
+
+# ---------------------------------------------------------------------------
+# Shared GemFire member settings
+# ---------------------------------------------------------------------------
+# Every member runs GemFire plus the SecurityManager jar (security/Dockerfile builds it).
+x-gemfire: &gemfire
+  image: gemfire-09-secure-xds-member
+  build:
+    context: ./security
+    args:
+      GEMFIRE_IMAGE: ${GEMFIRE_IMAGE}
+  environment:
+    ACCEPT_TERMS: "y"
+    # The token issuer's public key: the SecurityManager checks JWT signatures with it.
+    JWT_PUBLIC_KEY_FILE: /certs/jwt-public.pem
+    # Load the gRPC extension (.gfm) from the mounted gemfire-extensions folder.
+    GEMFIRE_EXTENSIONS_REPOSITORY_PATH: /gemfire-extensions
+  volumes:
+    - ${GEMFIRE_EXTENSIONS_DIR}/${GRPC_EXTENSION_FILE}:/gemfire-extensions/${GRPC_EXTENSION_FILE}:ro
+    - ./gemfire:/scripts:ro
+    # Only what a member needs from ./certs: its keystore, the truststore (for client certificates)
+    # and the issuer's PUBLIC key. The issuer's private key is mounted into the issuer alone.
+    - ./certs/server.p12:/certs/server.p12:ro
+    - ./certs/truststore.p12:/certs/truststore.p12:ro
+    - ./certs/jwt-public.pem:/certs/jwt-public.pem:ro
+  healthcheck:
+    # Healthy once the member logs that its gRPC service started. (Probing port 50051 directly
+    # skews the extension's grpc.server.connections stat — see README "Findings".)
+    test: ["CMD", "bash", "-c", "grep -qE 'gRPC Cache Server started|Initialized cache service com.vmware.gemfire.grpc.locator' /data/*.log"]
+    interval: 5s
+    timeout: 3s
+    retries: 40
+    start_period: 15s
+
+# The client is a small HTTP service (:8080): it runs the narrated demo at startup, then serves the
+# /crud API (with ?via=direct|xds) that the k6 load tests in ../load-testing call. See README.
+x-client: &client
+  environment: &client-env
+    EXAMPLE: 09-secure-xds
+    REGION: orders
+    PAYLOAD_BYTES: ${PAYLOAD_BYTES}
+    HTTP_THREADS: ${HTTP_THREADS}
+    DEMO_ON_START: ${DEMO_ON_START}
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+    interval: 3s
+    timeout: 3s
+    retries: 60
+    start_period: 10s
+  depends_on:
+    gfsh-init: { condition: service_completed_successfully }
+    issuer: { condition: service_healthy }
+
+services:
+  # -------------------------------------------------------------------------
+  # GemFire cluster: 1 locator + 2 servers, gRPC extension on every member
+  # -------------------------------------------------------------------------
+  # One-shot: make the demo CA, the server and the client certificates in ./certs (skipped if
+  # they exist). openssl, because the Go client needs its private key as PEM.
+  certs:
+    image: alpine:3.24.3
+    entrypoint: ["sh", "/scripts/make-certs.sh"]
+    volumes:
+      - ./gemfire:/scripts:ro
+      - ./certs:/certs
+
+  locator:
+    <<: *gemfire
+    hostname: locator
+    command: ["bash", "/scripts/start-member.sh", "locator"]
+    depends_on:
+      certs: { condition: service_completed_successfully }
+
+  server1:
+    <<: *gemfire
+    hostname: server1
+    command: ["bash", "/scripts/start-member.sh", "server"]
+    depends_on:
+      locator: { condition: service_healthy }
+
+  server2:
+    <<: *gemfire
+    hostname: server2
+    command: ["bash", "/scripts/start-member.sh", "server"]
+    depends_on:
+      locator: { condition: service_healthy }
+
+  # One-shot: log in as admin, create the regions, then exit 0.
+  gfsh-init:
+    image: gemfire-09-secure-xds-member
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./gemfire:/scripts:ro
+    command: ["gfsh", "run", "--file=/scripts/init.gfsh"]
+    depends_on:
+      server1: { condition: service_healthy }
+      server2: { condition: service_healthy }
+
+  # -------------------------------------------------------------------------
+  # Client: grpc-go only, with two mutual-TLS channels to the same cluster (direct and xds, as in
+  # 07). Every call also carries a JWT from the issuer for the user it acts as (?user=, as in 08).
+  grpc-client-go:
+    <<: *client
+    build:
+      context: ./grpc-client-go
+      additional_contexts:
+        gemfire-extensions: ${GEMFIRE_EXTENSIONS_DIR}
+    environment:
+      <<: *client-env
+      GRPC_TARGET: dns:///server1:50051
+      GRPC_XDS_TARGET: xds:///gemfire_grpc
+      # Where grpc-go finds the xDS server (the locator) and how to trust it. See grpc-client-go/xds-bootstrap.json.
+      GRPC_XDS_BOOTSTRAP: /app/xds-bootstrap.json
+      TLS_CA_FILE: /certs/ca.pem
+      TLS_CERT_FILE: /certs/client.pem
+      TLS_KEY_FILE: /certs/client-key.pem
+      # The hostname the xds channel's server certificates are checked against (see README).
+      GRPC_XDS_AUTHORITY: ${GRPC_XDS_AUTHORITY:-gemfire}
+      # Where the client gets its users' tokens.
+      ISSUER_URL: http://issuer:8080
+      JWT_PUBLIC_KEY_FILE: /certs/jwt-public.pem
+    volumes:
+      - ./grpc-client-go/xds-bootstrap.json:/app/xds-bootstrap.json:ro
+      - ./certs/ca.pem:/certs/ca.pem:ro
+      - ./certs/client.pem:/certs/client.pem:ro
+      - ./certs/client-key.pem:/certs/client-key.pem:ro
+      # Public by nature: the demo uses it to try the classic HS256 "alg swap" forgery.
+      - ./certs/jwt-public.pem:/certs/jwt-public.pem:ro
+    ports:
+      - "${GRPC_GO_CLIENT_PORT}:8080"
+
+  # The token issuer (an identity provider stand-in): signs RS256 JWTs with the private key that
+  # only it holds. GET /token?user=alice|bob|carol. See issuer/main.go.
+  issuer:
+    build:
+      context: ./issuer
+    environment:
+      JWT_PRIVATE_KEY_FILE: /keys/jwt-private.pem
+    volumes:
+      - ./certs/jwt-private.pem:/keys/jwt-private.pem:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      certs: { condition: service_completed_successfully }
+    ports:
+      - "${ISSUER_PORT}:8080"
+
+  # -------------------------------------------------------------------------
+  # Monitoring
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+      # k6 load tests push their metrics here (Prometheus remote write), as native histograms.
+      - --web.enable-remote-write-receiver
+      - --enable-feature=native-histograms
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/secure-xds.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    depends_on: [prometheus]
+
+  # Per-container CPU / memory.
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=5s
+      - --store_container_labels=true
+      # With Docker's containerd image store (`docker info`: Storage Driver overlayfs), cAdvisor
+      # looks containers up through containerd. Without the socket it reports only the root
+      # cgroup and every cAdvisor panel is empty. Reached via the /rootfs mount, because Docker
+      # Desktop resolves a /var/run bind mount to the Mac's own /var/run, not the VM's.
+      - --containerd=/rootfs/run/containerd/containerd.sock
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro

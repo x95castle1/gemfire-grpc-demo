@@ -1,5 +1,5 @@
 // Description: Balanced vs not: light traffic over the direct and the xds channel at once (20 req/s each, 1m) for the dashboard
-// Examples: 05, 06, 07
+// Examples: 05, 06, 07, 09
 // Clients: grpc-go
 // Run: parallel
 // Breakdown: via=direct,xds

@@ -63,9 +63,10 @@ queries into the messages' fields. The queries go through `lib/query.js`, so the
 |---|---|---|
 | `people/steady` | constant arrival rate · `get` 50%, `put` 20%, `by-city` 15%, `age-range` 10%, `nickname` 5% · 100 req/s · 1 m | parallel (one client) |
 
-### xDS scripts (05-xds-discovery, 06-tls, 07-mtls)
+### xDS scripts (05-xds-discovery, 06-tls, 07-mtls, 09-secure-xds)
 
-05–07's Go clients reach the cluster over two channels (TLS in 06, mutual TLS in 07), `direct` (`dns:///server1:50051`) and
+05–07's and 09's Go clients reach the cluster over two channels (TLS in 06, mutual TLS in 07,
+mutual TLS plus tokens in 09), `direct` (`dns:///server1:50051`) and
 `xds` (`xds:///gemfire_grpc`). Both scripts run one scenario per channel at the same time, with
 80% Get and 20% Put. The traffic is light on purpose: these scripts are there to show on the
 dashboard which server answers each call, not to measure speed. They break the results down by
@@ -76,7 +77,7 @@ dashboard which server answers each call, not to measure speed. They break the r
 | `xds/balance` | both channels · 20 req/s each · 1 m | parallel (one client) |
 | `xds/failover` | both channels · 20 req/s each · 2 m · `Events: 40s stop server1, 80s start server1` · failures allowed | parallel (one client) |
 
-### Auth script (08-token-auth-rbac)
+### Auth script (08-token-auth-rbac, 09-secure-xds)
 
 08's Go client acts as different users (`?user=`), each with its own JWT. `auth/mixed` sends random
 users doing Gets and Puts on two regions. 401 (UNAUTHENTICATED) and 403 (PERMISSION_DENIED) are the
@@ -102,8 +103,8 @@ load-testing/
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
 ├── scripts/people/    # 04: steady
-├── scripts/xds/       # 05–07: balance · failover
-├── scripts/auth/      # 08: mixed
+├── scripts/xds/       # 05–07, 09: balance · failover
+├── scripts/auth/      # 08, 09: mixed
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

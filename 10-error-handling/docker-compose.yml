@@ -1,0 +1,148 @@
+name: gemfire-10-error-handling
+
+# ---------------------------------------------------------------------------
+# Shared GemFire member settings
+# ---------------------------------------------------------------------------
+x-gemfire: &gemfire
+  image: ${GEMFIRE_IMAGE}
+  environment:
+    ACCEPT_TERMS: "y"
+    # Load the gRPC extension (.gfm) from the mounted gemfire-extensions folder.
+    GEMFIRE_EXTENSIONS_REPOSITORY_PATH: /gemfire-extensions
+    # Server limits the demo runs into (start-member.sh, .env)
+    SERVER_HEAP: ${SERVER_HEAP}
+    CRITICAL_HEAP_PERCENTAGE: ${CRITICAL_HEAP_PERCENTAGE}
+    MAX_QUERY_EXECUTION_TIME: ${MAX_QUERY_EXECUTION_TIME}
+  volumes:
+    - ${GEMFIRE_EXTENSIONS_DIR}/${GRPC_EXTENSION_FILE}:/gemfire-extensions/${GRPC_EXTENSION_FILE}:ro
+    - ./gemfire:/scripts:ro
+  healthcheck:
+    # Healthy once the member logs that its gRPC service started. (Probing port 50051 directly
+    # skews the extension's grpc.server.connections stat — see README "Findings".)
+    test: ["CMD", "bash", "-c", "grep -qE 'gRPC Cache Server started|Initialized cache service com.vmware.gemfire.grpc.locator' /data/*.log"]
+    interval: 5s
+    timeout: 3s
+    retries: 40
+    start_period: 15s
+
+# The client is a small HTTP service (:8080): it runs the narrated demo at startup, then serves the
+# /crud API (with ?via=failfast|retry|waitforready) that the k6 load tests in ../load-testing call. See README.
+x-client: &client
+  environment: &client-env
+    EXAMPLE: 10-error-handling
+    REGION: orders
+    PAYLOAD_BYTES: ${PAYLOAD_BYTES}
+    HTTP_THREADS: ${HTTP_THREADS}
+    DEMO_ON_START: ${DEMO_ON_START}
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:8080/health"]
+    interval: 3s
+    timeout: 3s
+    retries: 60
+    start_period: 10s
+  depends_on:
+    gfsh-init: { condition: service_completed_successfully }
+
+services:
+  # -------------------------------------------------------------------------
+  # GemFire cluster: 1 locator + 2 servers, gRPC extension on every member
+  # -------------------------------------------------------------------------
+  locator:
+    <<: *gemfire
+    hostname: locator
+    command: ["bash", "/scripts/start-member.sh", "locator"]
+
+  server1:
+    <<: *gemfire
+    hostname: server1
+    command: ["bash", "/scripts/start-member.sh", "server"]
+    depends_on:
+      locator: { condition: service_healthy }
+
+  server2:
+    <<: *gemfire
+    hostname: server2
+    command: ["bash", "/scripts/start-member.sh", "server"]
+    depends_on:
+      locator: { condition: service_healthy }
+
+  # One-shot: create regions and print extension info, then exit 0.
+  gfsh-init:
+    image: ${GEMFIRE_IMAGE}
+    environment:
+      ACCEPT_TERMS: "y"
+    volumes:
+      - ./gemfire:/scripts:ro
+    command: ["gfsh", "run", "--file=/scripts/init.gfsh"]
+    depends_on:
+      server1: { condition: service_healthy }
+      server2: { condition: service_healthy }
+
+  # -------------------------------------------------------------------------
+  # Client: grpc-go only, with three channels to server1, one per way of handling a failure
+  # (see README): failfast (the default), retry (a retry policy), waitforready (wait, up to a deadline)
+  # -------------------------------------------------------------------------
+  grpc-client-go:
+    <<: *client
+    build:
+      context: ./grpc-client-go
+      additional_contexts:
+        gemfire-extensions: ${GEMFIRE_EXTENSIONS_DIR}
+    environment:
+      <<: *client-env
+      GRPC_TARGET: dns:///server1:50051
+      # Shown only to the client (for the server limits it reports and asserts)
+      CRITICAL_HEAP_PERCENTAGE: ${CRITICAL_HEAP_PERCENTAGE}
+      MAX_QUERY_EXECUTION_TIME: ${MAX_QUERY_EXECUTION_TIME}
+    ports:
+      - "${GRPC_GO_CLIENT_PORT}:8080"
+
+  # -------------------------------------------------------------------------
+  # Monitoring
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+      # k6 load tests push their metrics here (Prometheus remote write), as native histograms.
+      - --web.enable-remote-write-receiver
+      - --enable-feature=native-histograms
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+
+  grafana:
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/error-handling.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    depends_on: [prometheus]
+
+  # Per-container CPU / memory.
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    privileged: true
+    command:
+      - --docker_only=true
+      - --housekeeping_interval=5s
+      - --store_container_labels=true
+      # With Docker's containerd image store (`docker info`: Storage Driver overlayfs), cAdvisor
+      # looks containers up through containerd. Without the socket it reports only the root
+      # cgroup and every cAdvisor panel is empty. Reached via the /rootfs mount, because Docker
+      # Desktop resolves a /var/run bind mount to the Mac's own /var/run, not the VM's.
+      - --containerd=/rootfs/run/containerd/containerd.sock
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro

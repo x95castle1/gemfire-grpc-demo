@@ -1,0 +1,13 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy.
+connect --locator=locator[10334]
+
+# PARTITION_REDUNDANT: every bucket has a copy on the other server, so when the retries load test
+# stops server1, no data is lost and the test measures how each channel copes.
+create region --name=orders --type=PARTITION_REDUNDANT --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION_REDUNDANT --if-not-exists
+# The low-memory demo fills this region until the servers refuse writes, then clears it.
+create region --name=ballast --type=PARTITION --if-not-exists
+# There is deliberately no region called "missing": calls to it get FAILED_PRECONDITION.
+
+describe member --name=server1
+list regions

@@ -89,6 +89,19 @@ point of the test, so `http.expectedStatuses(200, 401, 403)` keeps them out of `
 |---|---|---|
 | `auth/mixed` | alice, bob, carol, none × Get 70% / Put 30% × orders, customers · 20 req/s · 1 m | parallel (one client) |
 
+### Errors script (10-error-handling)
+
+10's Go client reaches server1 over three channels that handle a failure differently (`?via=`):
+`failfast` (the grpc-go default), `retry` (a retry policy) and `waitforready` (wait for a connection,
+up to a 30 s deadline). `errors/retries` runs one scenario per channel at the same time, 80% Get and
+20% Put, and stops server1 for 15 s partway through. Failures are the point, so they don't fail the
+run. waitforready parks calls while server1 is down, so each scenario pre-allocates enough VUs for
+30 s of them, and requests time out after 45 s.
+
+| Script | Load | Run |
+|---|---|---|
+| `errors/retries` | three channels · 20 req/s each · 2 m · `Events: 40s stop server1, 55s start server1` · failures allowed | parallel (one client) |
+
 ## Layout
 
 ```
@@ -99,12 +112,14 @@ load-testing/
 ├── lib/people.js      # /people helpers (04): Get/Put of Person messages, loading the data
 ├── lib/xds.js         # /crud calls with ?via=direct|xds (05): one scenario per channel
 ├── lib/auth.js        # /crud calls as alice, bob, carol or nobody (08); 401/403 are expected answers
+├── lib/errors.js      # /crud calls with ?via=failfast|retry|waitforready (10): one scenario per channel
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
 ├── scripts/people/    # 04: steady
 ├── scripts/xds/       # 05–07, 09: balance · failover
 ├── scripts/auth/      # 08, 09: mixed
+├── scripts/errors/    # 10: retries
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```

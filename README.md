@@ -31,7 +31,7 @@ You don't need a JDK, Gradle, Go or k6 on the host. Everything builds and runs i
 | 07 | [mtls](07-mtls/) | Mutual TLS from a **Go** client: client certificates (openssl), truststore + `ssl-require-authentication`, direct and xDS over mTLS (fallback credentials + authority) | none (Go only, by design) | [:3007](http://localhost:3007) | ✅ |
 | 08 | [token-auth-rbac](08-token-auth-rbac/) | Bearer JWTs from a **Go** client, a JWT `SecurityManager`, per-region `DATA:READ`/`WRITE`, UNAUTHENTICATED vs PERMISSION_DENIED, cluster users for members/gfsh/Prometheus | none (Go only, by design) | [:3008](http://localhost:3008) | ✅ |
 | 09 | [secure-xds](09-secure-xds/) | Everything on, from a **Go** client: xDS + mutual TLS + RS256 tokens (an issuer holds the private key, the cluster the public key), which layer stops what, secured failover | none (Go only, by design) | [:3009](http://localhost:3009) | ✅ |
-| 10 | error-handling | Every gRPC status code, retries, deadlines | Native exceptions | :3010 | planned |
+| 10 | [error-handling](10-error-handling/) | Status codes from a **Go** client and what to do about each, deadlines (client vs the server's query limit), fail-fast vs retry policy vs wait-for-ready through a scripted server outage, low memory (`RESOURCE_EXHAUSTED`) | none (Go only, by design) | [:3010](http://localhost:3010) | ✅ |
 | 11 | experiments | What drives the gRPC vs native gap: REPLICATE vs PARTITION (forwarding hop vs translation cost), a GemFire REST API baseline, sweeps across concurrency and payload size, server `worker-threads` tuning | full participant | :3011 | planned |
 
 Native-only GemFire features (continuous queries, cache listeners, interest registration,

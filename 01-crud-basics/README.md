@@ -94,21 +94,23 @@ make select-load-test EX=01 SCRIPT=crud/steady CLIENT=grpc-java K6_ARGS="-e RATE
 make results                                    # browse past runs
 ```
 
-A 2-minute `crud/steady` run (1,000 req/s per client, all three at once, Apple Silicon laptop):
+A 2-minute `crud/steady` run (1,000 req/s per client, all three at once, Apple Silicon laptop, Spring Boot
+Java clients). It ran on a warm stack: the first run after `make start` had p99s up to 16× higher
+while the JVMs and the servers warmed up, so run something first, or ignore the first run.
 
 ```
 CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │   CPU/REQ  RESULT
                                                   │        (ms)        (ms)        (ms) │        (ms)        (ms) │      (µs)
-native-java               120002    997.9      0% │       0.256       0.694       2.502 │       0.102       0.761 │       187  PASS
-grpc-java                 119997    996.3      0% │       0.455       1.152       4.582 │       0.311       3.088 │       266  PASS
-grpc-go                   119986    995.7      0% │       0.381       0.958       3.292 │       0.258       2.398 │       216  PASS
-grpc-java vs native                               │  78% slower  66% slower  83% slower │ 3.0× slower 4.1× slower │  42% more
-grpc-go vs native                                 │  49% slower  38% slower  32% slower │ 2.5× slower 3.2× slower │  16% more
-grpc-go vs grpc-java                              │  16% faster  17% faster  28% faster │  17% faster  22% faster │  19% less
+native-java               120002    999.3      0% │       0.271       0.503       0.905 │       0.102       0.378 │       209  PASS
+grpc-java                 120002    998.6      0% │       0.433       0.789       1.511 │       0.276       0.926 │       273  PASS
+grpc-go                   120002    998.7      0% │       0.360       0.639       1.112 │       0.242       0.798 │       242  PASS
+grpc-java vs native                               │  60% slower  57% slower  67% slower │ 2.7× slower 2.4× slower │  31% more
+grpc-go vs native                                 │  33% slower  27% slower  23% slower │ 2.4× slower 2.1× slower │  16% more
+grpc-go vs grpc-java                              │  17% faster  19% faster  26% faster │  12% faster  14% faster │  11% less
 ```
 
 - **E2E** is what k6 saw: the HTTP request plus the GemFire call.
-- **GF** is the GemFire call alone. Every service adds roughly the same 0.12–0.15 ms of HTTP
+- **GF** is the GemFire call alone. Every service adds roughly the same 0.12–0.17 ms of HTTP
   overhead, so the end-to-end comparison understates the difference between the clients, and
   the GF comparison shows it.
 - **CPU/REQ** is the client container's CPU (from cAdvisor) divided by requests.
@@ -126,18 +128,18 @@ widens:
 ```
 CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │   CPU/REQ  RESULT
                                                   │        (ms)        (ms)        (ms) │        (ms)        (ms) │      (µs)
-native-java               655329    32685      0% │       0.368       0.916       1.893 │       0.090       0.610 │        90  PASS
-grpc-java                 336869    16734      0% │       0.808       1.585       2.763 │       0.548       1.854 │       153  PASS
-grpc-go                   368959  18344.8      0% │       0.679       1.794       2.555 │       0.476       1.956 │        88  PASS
-grpc-java vs native                               │ 2.2× slower  73% slower  46% slower │ 6.1× slower 3.0× slower │  70% more
-grpc-go vs native                                 │  85% slower  96% slower  35% slower │ 5.3× slower 3.2× slower │   2% less
-grpc-go vs grpc-java                              │  16% faster  13% slower   8% faster │  13% faster   6% slower │  42% less
+native-java              4131384  34401.4      0% │       0.365       0.845       1.457 │       0.085       0.567 │        95  PASS
+grpc-java                2209396  18393.7      0% │       0.783       1.309       1.924 │       0.522       1.283 │       153  PASS
+grpc-go                  2375742  19779.6      0% │       0.714       1.278       1.835 │       0.506       1.389 │       108  PASS
+grpc-java vs native                               │ 2.1× slower  55% slower  32% slower │ 6.1× slower 2.3× slower │  61% more
+grpc-go vs native                                 │  96% slower  51% slower  26% slower │ 6.0× slower 2.4× slower │  14% more
+grpc-go vs grpc-java                              │   9% faster   2% faster   5% faster │   3% faster   8% slower │  29% less
 ```
 
-Go's gRPC library is a little faster than grpc-java (about 20% at a steady rate, 10% at
-saturation) and much cheaper on the client: about 40% less CPU per request than grpc-java, about
-the same as native, in a 25 MB container next to ~900 MB for each JVM. Even so, grpc-go's
-GemFire calls still take 2.5–5 times as long as native's. **Most of the gap is on the gRPC protocol and server
+Go's gRPC library is a little faster than grpc-java (about 15% at a steady rate, under 10% at
+saturation) and cheaper on the client: 11–29% less CPU per request than grpc-java, within about 15%
+of native, in a 25 MB container next to 700–950 MB for each JVM. Even so, grpc-go's GemFire calls
+still take 2.4–6 times as long as native's. **Most of the gap is on the gRPC protocol and server
 side, not in grpc-java.** See finding 7.
 
 ## RPC ↔ native Java API
@@ -189,8 +191,8 @@ same numbers as the terminal table.
   overhead is about the same in every client.
 - **Per-operation latency table.** Every op's p50 for all three clients, plus "grpc-java vs
   native" and "grpc-go vs native" columns in words (red = slower, green = faster), sorted by the
-  first. Single-call ops come out about 2–3.5× slower over gRPC. The ops where native needs two
-  calls (`GetAndPut`, `GetAndRemove`, `Remove`) drop to about 10–90% slower, and the atomic gRPC
+  first. Single-call ops come out about 2–3× slower over gRPC. The ops where native needs two
+  calls (`GetAndPut`, `GetAndRemove`, `Remove`) drop to about 17–83% slower, and the atomic gRPC
   call becomes the better deal.
 - **Puts forwarded to the owning server.** Both gRPC clients send everything to `server1`, so
   about half their writes land on a server that doesn't own the bucket and get forwarded. Native
@@ -245,12 +247,12 @@ same numbers as the terminal table.
    `server.tomcat.max-keep-alive-requests=-1` (set in `application.properties`). This is about the
    HTTP wrapper, not GemFire, but it would have hidden every difference between the clients.
 7. **The gRPC overhead isn't grpc-java's fault.** Go's gRPC library is a different
-   implementation (its own HTTP/2 stack, no Netty, no JIT), yet it lands within 10–20% of
-   grpc-java on the GemFire call and still takes 2.5–5 times as long as native. What both gRPC clients
+   implementation (its own HTTP/2 stack, no Netty, no JIT), yet it lands within 3–15% of
+   grpc-java on the GemFire call and still takes 2.4–6 times as long as native. What both gRPC clients
    share is the server side: every call goes through `server1`'s gRPC service, which decodes
    protobuf, converts it to Java objects, and forwards about half of all operations to
    `server2`. Native single-hop goes straight to the owning server in GemFire's own binary
-   protocol. Where the gRPC library *does* matter is client cost: grpc-go uses about 40% less
+   protocol. Where the gRPC library *does* matter is client cost: grpc-go uses 11–29% less
    CPU per request than grpc-java.
 
    [`bucket-latency.py`](../load-testing/probes/bucket-latency.py) groups keys by bucket

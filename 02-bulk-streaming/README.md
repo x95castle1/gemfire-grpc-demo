@@ -164,7 +164,92 @@ grpc-java vs native · unary×1        │                      4.1× fewer │ 
 
 ### Throughput, chunk size, large values, key sets
 
-RESULTS_PLACEHOLDER
+Each script runs one client at a time on an Apple Silicon laptop (Docker with 12 CPUs, no limits).
+Server and client CPU come from cAdvisor, over each client's run.
+
+**`bulk/throughput`**: 4 VUs loop put → get → remove of 10,000 entries in chunks of 500, for 2 minutes.
+
+```
+CLIENT                   CALLS     ENTRIES  ENTRIES/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │    CPU/1k  RESULT
+                                                              │        (ms)        (ms)        (ms) │        (ms)        (ms) │     (µs)
+native-java               7091    70890000     589348      0% │      45.500     175.418     313.682 │      43.921     311.556 │      3725  PASS
+grpc-java                 2525    25230000     209226      0% │     113.082     410.516     502.515 │     112.001     501.264 │       948  PASS
+grpc-java vs native                        2.8× fewer         │ 2.5× slower 2.3× slower  60% slower │ 2.6× slower  61% slower │ 3.9× less
+```
+
+| CPU (cores) during the run | server1 | server2 | client | server CPU per entry | client CPU per entry |
+|---|---|---|---|---|---|
+| native-java | 2.48 | 2.47 | 1.98 | 8.4 µs | 3.4 µs |
+| grpc-java | 2.48 | 1.54 | 0.19 | 19.2 µs | 0.9 µs |
+
+- **gRPC moves 2.8× fewer entries per second.**
+- **Lower client CPU doesn't mean cheaper.** grpc-java's client uses 3.9× less CPU per entry because
+  the work moved to the servers. The servers spend 2.3× more CPU per entry. Counting both sides, a
+  gRPC entry costs 20 µs of CPU and a native one 12 µs.
+- **The work isn't spread evenly.** Native single-hop splits each chunk by bucket, so both servers
+  do the same work. Every gRPC stream goes to server1, which translates the messages and forwards
+  about half the entries to server2, so server1 does 62% of the server work.
+
+**`bulk/batch-sweep`**: the same cycle at 10, 100, 500, 1,000 and 5,000 entries per chunk, 30 s each.
+
+```
+CLIENT · batch                       │    CALLS     ENTRIES  ENTRIES/S │      GF p50         p99
+                                     │                                 │        (ms)        (ms)
+native-java · 10                     │      624     6240000     208000 │     189.269     223.701
+native-java · 100                    │     1713    17130000     571000 │      63.033     122.142
+native-java · 500                    │     1839    18390000     613000 │      43.283     338.297
+native-java · 1000                   │     1563    15630000     521000 │      63.245     327.359
+native-java · 5000                   │     2076    20760000     692000 │      46.546     291.552
+grpc-java · 10                       │      300     3000000     100000 │     411.107    1159.204
+grpc-java · 100                      │      372     3720000     124000 │     329.515     378.968
+grpc-java · 500                      │      708     7080000     236000 │     104.928     357.864
+grpc-java · 1000                     │      816     8160000     272000 │      69.394     344.377
+grpc-java · 5000                     │      804     8040000     268000 │      73.395     375.291
+grpc-java vs native · 10             │                      2.1× fewer │ 2.2× slower 5.2× slower
+grpc-java vs native · 100            │                      4.6× fewer │ 5.2× slower 3.1× slower
+grpc-java vs native · 500            │                      2.6× fewer │ 2.4× slower   6% slower
+grpc-java vs native · 1000           │                       48% fewer │  10% slower   5% slower
+grpc-java vs native · 5000           │                      2.6× fewer │  58% slower  29% slower
+```
+
+- **gRPC needs bigger chunks.** At 10 and 100 entries per chunk it barely moves (100,000 and 124,000
+  entries/s). It jumps at 500 and levels off at 1,000 (272,000).
+- **Native is already at 571,000 entries/s with chunks of 100.** Each native call is a blocking
+  round trip, but single-hop sends each server only its own keys.
+- **Chunks bigger than `bulk-batch-size` don't help gRPC.** 5,000 is no better than 1,000. The
+  server re-batches every stream into operations of at most 1,000 entries (the default).
+- **The native rows are noisy.** 1,000 came out below 500, and 5,000 above both. 30 s per chunk size
+  is short for the native client; read the trend, not each step.
+
+**`bulk/large-payload`**: the cycle with 64 KiB values, 2,000 entries, chunks capped at ~1 MiB (16 entries), 1.5 minutes.
+
+```
+CLIENT                   CALLS     ENTRIES  ENTRIES/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │    CPU/1k  RESULT
+                                                              │        (ms)        (ms)        (ms) │        (ms)        (ms) │     (µs)
+native-java               4121     8238000      91422      0% │      99.466     177.718     207.867 │      98.040     206.083 │     35124  PASS
+grpc-java                 1454     2904000      32187      0% │     336.372     398.433     463.019 │     335.805     462.139 │     21685  PASS
+grpc-java vs native                        2.8× fewer         │ 3.4× slower 2.2× slower 2.2× slower │ 3.4× slower 2.2× slower │  38% less
+```
+
+- **The same 2.8× as with 1 KiB values.** That's about 2.1 GB/s of values for gRPC and 6.0 GB/s for native.
+- **server1 works hardest.** During grpc-java's run it used 3.4 cores against server2's 1.3. Server
+  CPU per entry is 3.0× native's (147 µs vs 49 µs), because every value is copied into a protobuf message
+  and back out on server1, and half are forwarded on.
+
+**`bulk/keyset`**: a region of 500,000 keys, its whole key set fetched over and over by 2 VUs for 1 minute.
+
+```
+CLIENT                   CALLS     ENTRIES  ENTRIES/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │    CPU/1k  RESULT
+                                                              │        (ms)        (ms)        (ms) │        (ms)        (ms) │     (µs)
+native-java                554   275500000    4445965      0% │     214.813     265.149     308.157 │     213.206     295.024 │       750  PASS
+grpc-java                  623   310000000    4862238      0% │     192.476     208.722     233.652 │     191.165     221.528 │       104  PASS
+grpc-java vs native                           9% more         │  10% faster  21% faster  24% faster │  10% faster  25% faster │ 7.2× less
+```
+
+- **The one bulk operation where gRPC wins.** KeySetStream lists 500,000 keys in 191 ms (p50), 10%
+  faster than `keySetOnServer`, with a 25% better p99.
+- **The client CPU tells why.** native-java spent 2.8 cores deserializing one 500,000-key `Set` per call,
+  and grpc-java 0.5 cores reading pages of 1,000 keys. Server CPU was about the same (2.5 vs 2.2 cores).
 
 ## RPC ↔ native Java API
 
@@ -224,7 +309,33 @@ dropdown then lists only that mode's ops: streamed calls are named `…Stream`, 
 
 ## Findings and gotchas
 
-FINDINGS_PLACEHOLDER
+1. **Streaming is the only fast way to move many entries over gRPC.** A PutStream is about 14×
+   faster than one Put per entry, and 5.5× faster than 16 unary calls in flight (`bulk/stream-vs-unary`).
+2. **Even streamed, gRPC moves about 2.8× fewer entries per second than putAll/getAll/removeAll.**
+   That held for 1 KiB values, 64 KiB values, and chunk sizes from 500 up (`bulk/throughput`,
+   `bulk/large-payload`, `bulk/batch-sweep`).
+3. **Key sets are the exception.** KeySetStream beat `keySetOnServer` by 10% at p50 and 25% at p99,
+   with 7× less client CPU: pages of keys are cheaper to read than one huge `Set`.
+4. **The gap is server work, and it lands on server1.**
+   - Every stream from a `dns:///server1` channel goes to server1, which translates it and forwards half the entries.
+   - Native single-hop sends each server its own keys.
+   - Per entry, the servers spent 2.3× (1 KiB) to 3.0× (64 KiB) more CPU for gRPC, and server1 did most of it.
+   - xDS ([05](../05-xds-discovery/)) spreads the streams across servers, but it isn't partition-aware either.
+5. **Low client CPU isn't low cost.** grpc-java's client used less CPU per entry than native-java's
+   in every run: 38% less with 64 KiB values, 3.9× less with 1 KiB, 7.2× less for key sets.
+   That's because the server does the work the native client does itself (bucket routing, serialization).
+6. **Use chunks of at least 500 entries, and no more than `bulk-batch-size`.** gRPC's throughput rises
+   steeply up to 1,000 entries per chunk and stops there, because the server re-batches into operations of
+   `gemfire.grpc.bulk-batch-size` (1,000). Raise that setting before raising the chunk size.
+7. **Chunk by bytes too.** One message over `max-message-size` (4 MiB) fails the whole stream with
+   `RESOURCE_EXHAUSTED`. Native putAll has no such limit (demo section 9).
+8. **Streams aren't transactional, and neither is putAll.** A bad chunk fails the stream with
+   `INVALID_ARGUMENT`, but the chunks before it stay written (demo section 10). Make bulk writes
+   idempotent, so a failed stream can simply be sent again.
+9. **GetStream leaves out missing keys; getAll maps them to null.** Count what comes back, rather than
+   assuming one result per key.
+10. **Respect flow control.** `StreamObserver.onNext` never blocks, so a fast producer piles messages
+    up in client memory. Wait for `isReady()` (see `StreamCall`).
 
 ## Layout
 

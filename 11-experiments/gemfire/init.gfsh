@@ -1,0 +1,16 @@
+# Runs once (gfsh-init service) after the locator and both servers are healthy.
+connect --locator=locator[10334]
+
+# The two regions the experiments compare (every /crud op takes ?region=partition|replicate):
+#   crud-partition  PARTITION, as in 01: each key lives on one server. The native client's single-hop
+#                   sends it there; the gRPC client sends everything to server1, which forwards
+#                   about half the calls to server2.
+#   crud-replicate  REPLICATE: every server holds every key, so server1 answers every gRPC Get
+#                   itself. Writes still go to both servers, for both clients.
+create region --name=crud-partition --type=PARTITION --if-not-exists
+create region --name=crud-replicate --type=REPLICATE --if-not-exists
+create region --name=demo-grpc-go --type=PARTITION --if-not-exists
+create region --name=demo-native --type=PARTITION --if-not-exists
+
+describe member --name=server1 --extensions
+list regions

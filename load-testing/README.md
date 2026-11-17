@@ -102,6 +102,20 @@ run. waitforready parks calls while server1 is down, so each scenario pre-alloca
 |---|---|---|
 | `errors/retries` | three channels · 20 req/s each · 2 m · `Events: 40s stop server1, 55s start server1` · failures allowed | parallel (one client) |
 
+### Experiment scripts (11-experiments)
+
+11's clients (native-java and grpc-go) take `?region=partition|replicate` on every `/crud` op, and
+`?start=` on preload. Each script runs its steps one after another, one client at a time, and
+`load.sh` prints a row per step with REQ/S, GF p50/p99, and grpc-go vs native per step (see
+`Breakdown` under "Script headers").
+
+| Script | Steps | Load per step | Run |
+|---|---|---|---|
+| `experiments/region-type` | `region=partition,replicate` | 16 VUs, closed loop, the 13-op mix · 45 s | sequential |
+| `experiments/concurrency` | `vus=1,4,16,64` | closed loop, the 13-op mix · 30 s | sequential |
+| `experiments/payload` | `size=100,1024,10240,102400,1048576` | 8 VUs, Get 80% / Put 20%, each size on its own preloaded key range · 30 s | sequential |
+| `experiments/worker-threads` | (none) | 64 VUs, closed loop · 1 m; run by `11-experiments/worker-threads.sh`, once per `gemfire.grpc.worker-threads` setting | sequential |
+
 ## Layout
 
 ```
@@ -113,6 +127,8 @@ load-testing/
 ├── lib/xds.js         # /crud calls with ?via=direct|xds (05): one scenario per channel
 ├── lib/auth.js        # /crud calls as alice, bob, carol or nobody (08); 401/403 are expected answers
 ├── lib/errors.js      # /crud calls with ?via=failfast|retry|waitforready (10): one scenario per channel
+├── lib/experiments.js # /crud calls with ?region=, preload with ?start= (11)
+├── lib/slices.js      # steps that run one after another: scenarios, slice_seconds (11)
 ├── scripts/crud/      # 01: smoke · steady · ramp · saturate · read-heavy · write-heavy · large-payload
 ├── scripts/bulk/      # 02: smoke · throughput · stream-vs-unary · batch-sweep · large-payload · keyset
 ├── scripts/query/     # 03: steady
@@ -120,6 +136,7 @@ load-testing/
 ├── scripts/xds/       # 05–07, 09: balance · failover
 ├── scripts/auth/      # 08, 09: mixed
 ├── scripts/errors/    # 10: retries
+├── scripts/experiments/ # 11: region-type · concurrency · payload · worker-threads
 ├── probes/            # 01: bucket-latency.py, timings by bucket (plain Python, not k6; see "Probes")
 └── results/           # git-ignored; one folder per run (see below)
 ```
@@ -141,6 +158,10 @@ load-testing/
 - **`Breakdown`:** the script tags its requests with this tag, and its thresholds put the tagged
   sub-metrics in the summary export. `bulk/*` scripts get entries/s per value. Other scripts get
   calls, failed share and GF p50/p99 per value, plus a "value vs first value" row.
+  - If the values ran one after another rather than at the same time, the script records
+    `slice_seconds{tag}` (`lib/slices.js`).
+  - Then the table adds REQ/S per value (calls ÷ the time that value ran), plus a "client vs native" row per value.
+  - 11's experiments work this way.
 - **`Events`:** `make select-load-test` runs each `docker compose <action> <service>` on the
   example's own services at that many seconds after k6 starts. Each one is logged to `events.log`,
   printed under the table, and added to the Grafana dashboard as an annotation. It waits for every

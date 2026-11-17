@@ -586,6 +586,59 @@ requestBreakdownTable() {
     done
   done
 }
+# The same for request scripts whose tag values ran one after another (scripts that record
+# slice_seconds{tag}, via lib/slices.js): REQ/S per value = calls ÷ the time that slice ran. Then
+# "v vs first value" rows within each client, and "client vs native · v" rows across clients.
+hasSlices() {
+  local tag=${breakdown%%=*} first c
+  first=${breakdown#*=}; first=${first%%,*}
+  for c in "${targets[@]}"; do
+    ranOk "$c" && jq -e --arg k "slice_seconds{${tag}:${first}}" '.metrics | has($k)' "$results/${c}.json" >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+sliceBreakdownTable() {
+  local tag=${breakdown%%=*} values i c f line calls rps failed g50 g99
+  IFS=',' read -r -a values <<< "${breakdown#*=}"
+  echo
+  echo "By ${tag}: each ${tag} ran on its own, one after another (rows compare within a client, then across clients)"
+  printf '%s │ %8s %9s %8s │ %11s %11s\n' "$(label "CLIENT · ${tag}" 36)" CALLS 'REQ/S' FAILED 'GF p50' 'p99'
+  printf '%s │ %8s %9s %8s │ %11s %11s\n' "$(label '' 36)" '' '' '' '(ms)' '(ms)'
+  for c in "${targets[@]}"; do
+    ranOk "$c" || continue
+    f="$results/${c}.json"
+    for i in "${!values[@]}"; do
+      line=$(jq -r --arg t "${tag}:${values[$i]}" '.metrics as $m | ($m["slice_seconds{" + $t + "}"].count // 0) as $secs | [
+          ($m["http_reqs{" + $t + "}"].count // 0),
+          (if $secs > 0 then (($m["http_reqs{" + $t + "}"].count // 0) / $secs * 10 | round / 10) else 0 end),
+          (($m["http_req_failed{" + $t + "}"].value // 0) * 100),
+          ($m["gemfire_call_duration{" + $t + "}"].med // 0), ($m["gemfire_call_duration{" + $t + "}"]["p(99)"] // 0)
+        ] | map(tostring) | join(" ")' "$f")
+      kvSet "sb${i}" "$c" "$line"
+      read -r calls rps failed g50 g99 <<< "$line"
+      printf '%s │ %8s %9s %7.2f%% │ %11.3f %11.3f\n' "$(label "${c} · ${values[$i]}" 36)" "$calls" "$rps" "$failed" "$g50" "$g99"
+    done
+    for i in "${!values[@]}"; do
+      [ "$i" -eq 0 ] && continue
+      sliceRatio "${c} · ${values[$i]} vs ${values[0]}" "$(kvGet "sb${i}" "$c")" "$(kvGet sb0 "$c")"
+    done
+  done
+  ranOk native-java || return 0
+  for c in "${targets[@]}"; do
+    [ "$c" = native-java ] && continue
+    ranOk "$c" || continue
+    for i in "${!values[@]}"; do
+      sliceRatio "${c} vs native · ${values[$i]}" "$(kvGet "sb${i}" "$c")" "$(kvGet "sb${i}" native-java)"
+    done
+  done
+}
+sliceRatio() {   # label "calls rps failed p50 p99" (a) "..." (b)
+  local a b
+  read -r -a a <<< "$2"; read -r -a b <<< "$3"
+  [ ${#a[@]} -eq 5 ] && [ ${#b[@]} -eq 5 ] || return 0
+  printf '%s │ %8s %s %8s │ %s %s\n' "$(label "$1" 36)" '' "$(ratio "${a[1]}" "${b[1]}" 9 rate)" '' \
+    "$(ratio "${a[3]}" "${b[3]}" 11 time)" "$(ratio "${a[4]}" "${b[4]}" 11 time)"
+}
 breakdownRatio() {   # label "calls entries eps p50 p99" (a) "..." (b)
   local a b
   read -r -a a <<< "$2"; read -r -a b <<< "$3"
@@ -642,7 +695,7 @@ echo
   echo
   if [ $bulk -eq 1 ]; then bulkTable; else table; fi
   if [ -n "$breakdown" ]; then
-    if [ $bulk -eq 1 ]; then breakdownTable; else requestBreakdownTable; fi
+    if [ $bulk -eq 1 ]; then breakdownTable; elif hasSlices; then sliceBreakdownTable; else requestBreakdownTable; fi
   fi
   if [ -s "$results/events.log" ]; then
     echo

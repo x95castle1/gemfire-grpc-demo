@@ -97,6 +97,8 @@ make results                                    # browse past runs
 A 2-minute `crud/steady` run (1,000 req/s per client, all three at once, Apple Silicon laptop, Spring Boot
 Java clients). It ran on a warm stack: the first run after `make start` had p99s up to 16× higher
 while the JVMs and the servers warmed up, so run something first, or ignore the first run.
+The script's default is 5 minutes; this run was
+`make select-load-test EX=01 SCRIPT=crud/steady K6_ARGS="-e DURATION=2m"`.
 
 ```
 CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │   CPU/REQ  RESULT
@@ -123,7 +125,8 @@ grpc-go vs grpc-java                              │  17% faster  19% faster  2
   few requests.
 
 At maximum throughput (`crud/saturate`: 16 VUs in a closed loop, each client alone), the gap
-widens:
+widens. The script's default is 64 VUs; this run was
+`make select-load-test EX=01 SCRIPT=crud/saturate K6_ARGS="-e VUS=16"`.
 
 ```
 CLIENT                  REQUESTS    REQ/S  FAILED │     E2E p50         p95         p99 │      GF p50         p99 │   CPU/REQ  RESULT
